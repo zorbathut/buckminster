@@ -1,0 +1,19 @@
+# VS local directory
+.vs
+
+# Rider local directory
+.idea
+
+# User settings
+*.csproj.user
+*.sln.DotSettings.user
+
+# Built assets (C#)
+**/bin
+**/obj
+
+# Built assets (Rust)
+/target
+
+# Claude local settings
+**/.claude/settings.local.json
