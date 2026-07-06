@@ -1,0 +1,17 @@
+[tool.poetry]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.10"
+scons = "^4.8"
+pyright = "^1.1"
+
+# Pyright config for `./tool.bat check` (no separate pyrightconfig.json). Paths are relative to this file: ".." covers all of tools/ -- the command scripts plus lib/ -- and extraPaths makes `from lib import ...` resolve the way it does at runtime (tools/ is the script dir on sys.path).
+[tool.pyright]
+include = [".."]
+exclude = [".venv"]
+extraPaths = [".."]
+typeCheckingMode = "strict"
+pythonVersion = "3.10"
+venvPath = "."
+venv = ".venv"

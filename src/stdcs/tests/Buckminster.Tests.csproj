@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <!-- Run via the NUnit Microsoft.Testing.Platform runner, not legacy VSTest. The MTP opt-in must live in global.json's "test" key: the .NET 10 SDK removed the per-project VSTest bridge (TestingPlatformDotnetTestSupport errors at build), so there is no project-owned alternative. -->
+        <EnableNUnitRunner>true</EnableNUnitRunner>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="NUnit" Version="4.6.1" />
+        <PackageReference Include="NUnit3TestAdapter" Version="6.2.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../cs/Buckminster.csproj" />
+    </ItemGroup>
+
+</Project>

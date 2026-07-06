@@ -13,7 +13,14 @@
 **/obj
 
 # Built assets (Rust)
-/target
+/src/target
+
+# Tools venv (rebuilt by tools/lib/bootstrap.py)
+/tools/lib/.venv
+
+# Python bytecode caches
+__pycache__/
+*.pyc
 
 # Claude local settings
 **/.claude/settings.local.json

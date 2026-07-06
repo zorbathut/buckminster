@@ -1,0 +1,3 @@
+# Install into tools/lib/.venv (the same venv bootstrap.py creates and installs poetry into) instead of poetry's global cache -- one venv to verify, and pyright ([tool.pyright] in pyproject.toml here) points at it for import resolution.
+[virtualenvs]
+in-project = true
