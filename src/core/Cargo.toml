@@ -7,3 +7,5 @@ license = "MIT"
 # Module layout convention: language subdirs inside src/<module>/, so the crate root lives in rust/ rather than cargo's default src/.
 [lib]
 path = "rust/lib.rs"
+# cdylib is what C# loads; rlib is for integration tests and future dependent crates (in-crate unit tests work without it). staticlib joins in M2 for the emscripten link.
+crate-type = ["cdylib", "rlib"]

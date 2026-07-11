@@ -10,6 +10,20 @@ The default way to write anything must be simple — sacrificing power and perfo
 
 Hosts own the loop: the engine is a callee exposing `PumpEvents()` / `Tick(dt)` / `Render()`, and a desktop executable, a browser rAF callback, a Node script, or a test harness drives it. Rust owns platform glue, windowing, the low-level WebGPU rendering layer, and kernel primitives (RIDs, PRNG, logging transport), exported as flat `extern "C"` functions consumed via `[LibraryImport]`. C# owns the module registry, the engine object, the mesh/pass/dispatch layer, and everything above — code migrates C#→Rust only when profiling demands it. Three first-class run targets: `linux` (native), `web` (browser, emscripten), and `wasm-desktop` (the same emscripten build hosted by Node). Determinism is a hard engine property: same inputs, same order, fixed dt, deterministic game code ⇒ bit-identical sim state (full rules in PLAN.md's Determinism section).
 
+## FFI
+
+Everything crossing the Rust↔C# boundary is flat `extern "C"` with blittable args, hand-written bindings on both sides.
+
+**Entry-point wrapper**: every fallible `buck_*` export is a thin `extern "C"` fn whose body runs inside `ffi::guard` (`src/core/rust/ffi.rs`) — `catch_unwind` so no panic ever crosses the boundary, error-to-code mapping, and last-error storage. Exports return an `i32` `FfiCode` and write results through out-params. Out-params are non-null by caller contract and **unspecified on a nonzero return** — check the code before reading. Callback function pointers share the non-null contract, and more sharply: Rust declares them as non-nullable `fn` types, so a null there is an invalid value at the ABI boundary, not merely a pointer that must not be dereferenced. Codes: `0 Ok, 1 Panic, 2 CallbackError, 3 InvalidArgument` — defined in `ffi.rs`, hand-mirrored in `src/stdcs/cs/Ffi/FfiCode.cs`, kept in sync manually; new codes append.
+
+**`buck_last_error_message()`**: null if the last `buck_*` call on the calling thread succeeded; otherwise the error message, valid until the next `buck_*` call *other than `buck_last_error_message` itself* on the same thread — reading is non-destructive and repeatable. Callers copy immediately (`NativeMethods.LastErrorMessage()` does). This is the one deliberate exception to "every export runs inside guard": it is infallible, and routing it through the guard would clear the very error it exists to read.
+
+**Callback rules** (from PLAN.md, non-negotiable): (1) callbacks are `[UnmanagedCallersOnly]` static methods passed as function pointers, never marshalled delegates; (2) no exception ever escapes a callback — every callback body is a try/catch wrapper; (3) static callback + u64 userdata key, no closures — `CallbackTable` (`src/stdcs/cs/Ffi/CallbackTable.cs`) is the userdata registry, and the `[UnmanagedCallersOnly]` static recovers its target object from it by key; (4) Rust never holds a lock or borrow across a callback invocation. Plus the rail those four don't cover — **how a callback failure's detail reaches the original caller**: the callback's catch stashes the exception in `CallbackExceptionStash` (`src/stdcs/cs/Ffi/CallbackExceptionStash.cs` — per-thread, take-semantics so a stale exception can't be misattributed later) and returns nonzero; Rust maps any nonzero callback return to `CallbackError` (preserving the value in the message); the original caller sees `CallbackError`, takes the stash, and rethrows. Callbacks mirror the export shape: `i32` code return, result via out-param.
+
+**Bindings** (`src/stdcs/cs/Ffi/NativeMethods.cs`): `[LibraryImport]`, keeping the native snake_case names for 1:1 greppability against the Rust exports — the friendly PascalCase layer is the M4 Engine's job. Raw FFI stays `internal`, never public API; tests reach it via `InternalsVisibleTo`.
+
+**Native library wiring**: `src/stdcs/cs/Buckminster.csproj` copies `src/target/debug/libbuckminster_core.so` into the output dir (`None` + `CopyToOutputDirectory`, flowing transitively to test and host projects), with an explicit loud build error naming `./tool.bat build` when cargo hasn't produced it (skipped in IDE design-time builds so project load doesn't half-fail). The build tooling orders `build-dotnet` after `build-rust` for the same reason.
+
 ## Repo layout
 
 The root directory is a map of the repo, kept uncluttered: entry points (`tool.bat`, `SConstruct`, `Buckminster.slnx`), user-facing documentation, and the `src/` and `tools/` trees. Infrastructure files live down inside the tree they serve, not at the root. The one exception is `global.json`: the .NET SDK resolver and IDEs discover it by walking up from wherever `dotnet` runs, so it must sit at (or above) the solution — moving it into `src/` would silently unpin root-invoked builds. It also carries the `dotnet test` runner opt-in (Microsoft.Testing.Platform).
@@ -18,7 +32,7 @@ Source lives under `src/`, organized by module — not by language. `src/` itsel
 
 Current modules:
 
-- `src/core` — Rust. Kernel primitives; currently a placeholder awaiting the M1 FFI skeleton.
+- `src/core` — Rust. Kernel primitives; currently the FFI walking skeleton (entry-point wrapper rails plus the `buck_add`/callback/panic proof exports; real kernel surface arrives from M4 on).
 - `src/stdcs` — C#. The managed core library; assembly and root namespace `Buckminster`. Namespaces grow by topic (`Buckminster.Render`, …), not by module — the module split is a repo-organization detail.
 - `src/host-desktop` — C#. The desktop host executable (`Buckminster.Host.Desktop` assembly, `Buckminster` namespace consumer).
 

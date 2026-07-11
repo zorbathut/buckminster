@@ -1,2 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <!-- delegate* unmanaged function pointers in the FFI bindings. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <!-- cargo builds the debug profile today; profile selection becomes a property when a release path exists. Windows (.dll) joins at M5. -->
+        <BuckNativeLibrary>../../target/debug/libbuckminster_core.so</BuckNativeLibrary>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Raw FFI stays internal, never public API; tests reach it through this. -->
+        <InternalsVisibleTo Include="Buckminster.Tests" />
+        <!-- None + CopyToOutputDirectory flows transitively through ProjectReference, so test and host projects get the native library with no wiring of their own. -->
+        <None Include="$(BuckNativeLibrary)" Link="libbuckminster_core.so" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    </ItemGroup>
+
+    <!-- Loud, instructive failure when cargo hasn't run, instead of MSBuild's cryptic missing-file copy error. Skipped for IDE design-time builds so project load on a clean checkout doesn't half-fail with the message buried. -->
+    <Target Name="BuckCheckNativeLibrary" BeforeTargets="AssignTargetPaths" Condition="'$(DesignTimeBuild)' != 'true'">
+        <Error Condition="!Exists('$(BuckNativeLibrary)')" Text="Native library not found at $(BuckNativeLibrary) -- run './tool.bat build' (or 'cargo build' with cwd src/) before building the .NET solution." />
+    </Target>
+
 </Project>

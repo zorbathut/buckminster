@@ -3,7 +3,7 @@
 
 from typing import Callable
 
-from SCons.Script import Action, Alias, AlwaysBuild, Default  # type: ignore
+from SCons.Script import Action, Alias, AlwaysBuild, Default, Depends  # type: ignore
 
 # SCons node objects are opaque to callers; they only flow back into this facade.
 Target = object
@@ -24,6 +24,11 @@ def phony(name: str, action: Callable[[], int]) -> Target:
 def group(name: str, members: list[Target]) -> Target:
     """Define a named target that builds all of `members`."""
     return Alias(name, members)
+
+
+def depends(dependent: Target, prerequisite: Target) -> None:
+    """Order `dependent` after `prerequisite` (and make building `dependent` pull `prerequisite` in)."""
+    Depends(dependent, prerequisite)
 
 
 def default(target: Target) -> None:

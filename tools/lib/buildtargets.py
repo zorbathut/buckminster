@@ -32,4 +32,6 @@ def _build_dotnet() -> int:
 def define() -> None:
     rust = sconsfacade.phony("build-rust", _build_rust)
     dotnet = sconsfacade.phony("build-dotnet", _build_dotnet)
+    # dotnet copies the cargo-built native library into its output dirs, so rust must build first (alias-member order is not an ordering contract, especially under -j).
+    sconsfacade.depends(dotnet, rust)
     sconsfacade.default(sconsfacade.group("build", [rust, dotnet]))

@@ -4,6 +4,8 @@
         <OutputType>Exe</OutputType>
         <!-- Run via the NUnit Microsoft.Testing.Platform runner, not legacy VSTest. The MTP opt-in must live in global.json's "test" key: the .NET 10 SDK removed the per-project VSTest bridge (TestingPlatformDotnetTestSupport errors at build), so there is no project-owned alternative. -->
         <EnableNUnitRunner>true</EnableNUnitRunner>
+        <!-- delegate* unmanaged function pointers in the FFI tests. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
     <ItemGroup>
