@@ -1,0 +1,28 @@
+# CI: the M3 test matrix on Linux.
+#
+# HONESTY NOTE: this repo has no GitHub remote yet, so this workflow has never executed. It is validated by inspection, and every step is byte-identical to commands proven locally; its first real run (and any fixups) happen when a remote exists.
+#
+# Discipline notes:
+# - Do NOT add raw cargo steps here: rustup resolves rust-toolchain.toml from the invocation cwd, and a root-cwd cargo call silently uses the runner's default toolchain instead of the pin. All cargo invocations belong inside the tools (they run with cwd=src/).
+# - global.json (rollForward latestPatch) pins the SDK to the verified 10.0.1xx band; the runner image preinstalls a 10.0.1xx SDK, and the workload's emscripten pack must match the pin in docs/wasm-toolchain.md's matched set.
+# - The workload install is a known .NET 10 footgun class (workload-set manifest skew, dotnet/sdk#52090; `dotnet workload restore` is the occasional nudge). Fallback if the sudo route proves flaky: drop the system SDK from PATH and let the tool bootstrap provision a user-local ~/.dotnet, where ensure_dotnet_wasm auto-installs the workload without sudo.
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-all:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # Node 20 is the pinned matched-set dimension (docs/wasm-toolchain.md): it hosts the wasm-desktop target and runs the wasm test suites. The runner's default node is newer.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install the wasm-tools workload
+        run: sudo dotnet workload install wasm-tools
+      - name: Static gates (pyright strict, rustfmt, clippy)
+        run: ./tool.bat check
+      - name: Full test matrix
+        run: ./tool.bat test-all

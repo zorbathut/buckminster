@@ -1,10 +1,10 @@
 using System;
 using System.Runtime.InteropServices.JavaScript;
-using Buckminster.Ffi;
+using Buckminster.Tests;
 
 namespace Buckminster.Host.Web;
 
-// The browser host. Until M3's in-host test runner arrives, its whole job is handing the FFI smoke lines to main.js for rendering -- proof the Rust staticlib linked and runs in the browser.
+// The browser host. Its M3 job is running the C# test suite in-host and handing the report to main.js for rendering; this reverts to actual hosting when M4 gives it an engine to host.
 internal static class Program
 {
     private static int Main()
@@ -14,12 +14,15 @@ internal static class Program
     }
 }
 
-// JS-facing surface (main.js calls this via getAssemblyExports). This is host-executable surface, not Buckminster library API -- the raw-FFI-stays-internal rule is about the library. (Category-first naming: Exports is the kind of thing, Smoke the instance.)
-public partial class ExportsSmoke
+// JS-facing surface (main.js calls this via getAssemblyExports). Host-executable surface, not Buckminster library API. (Category-first naming: Exports is the kind of thing, Test the instance.)
+public partial class ExportsTest
 {
     [JSExport]
-    internal static string RunSmoke()
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "WasmHost.props publishes untrimmed (PublishTrimmed=false) and roots this assembly besides; no fixture can be trimmed away")]
+    internal static string RunTests()
     {
-        return string.Join("\n", FfiSmoke.Run());
+        // The final line is the driver's sentinel (tools/lib/wasmbrowser.py): the report ends with BUCK-TEST-EXIT:<0|1>.
+        (int failures, string report) = RunnerMini.Run(typeof(ExportsTest).Assembly);
+        return report + "\nBUCK-TEST-EXIT:" + (failures > 0 ? "1" : "0");
     }
 }

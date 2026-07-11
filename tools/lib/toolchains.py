@@ -23,6 +23,7 @@ class Toolchains:
 
 def ensure_toolchains() -> Toolchains:
     ensure_cc()
+    ensure_node()
     cargo = ensure_cargo()
     dotnet = ensure_dotnet()
     ensure_dotnet_wasm(dotnet)
@@ -139,7 +140,30 @@ def _install_rustup() -> None:
         util.run([installer, "-y", "--no-modify-path", "--profile", "minimal", "--default-toolchain", "none"])
 
 
-# --- .NET wasm workload (audit-and-instruct -- a recorded M2 deviation from the M0 auto-provision policy: a system-owned SDK needs sudo for workload installs, and .NET 10 workload-set scripting has footguns better solved alongside M3's CI fresh-machine story; revisit then) ---
+# --- Node (audit-only; PATH node is the wasm-desktop target's engine and the wasm test runner) ---
+
+
+# The node major version the wasm targets are verified against -- the Node row of docs/wasm-toolchain.md's matched set. Warn-only tripwire: newer V8s change wasm-EH flavor support, the "fails on Node, works in browser" glossary class.
+_NODE_PIN = 20
+
+
+def ensure_node() -> None:
+    node = shutil.which("node")
+    if node is None:
+        print("--------")
+        print("Error: node not found on PATH (it hosts the wasm-desktop target and runs the wasm test suites).")
+        print("Install Node 20 from https://nodejs.org/ or your package manager (Arch: sudo pacman -S nodejs; Ubuntu/Debian: sudo apt install nodejs).")
+        sys.exit(1)
+    try:
+        result = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=30)
+        version = result.stdout.strip()
+    except (subprocess.TimeoutExpired, OSError):
+        version = ""
+    if not version.startswith(f"v{_NODE_PIN}."):
+        print(f"Warning: node is {version or 'unknown'}, verified pin is v{_NODE_PIN}.x; wasm-EH flavor support differs across V8 versions (docs/wasm-toolchain.md) -- run the re-verification checklist if wasm tests misbehave.")
+
+
+# --- .NET wasm workload (auto-provisioned when the SDK root is user-writable, e.g. the bootstrap's own ~/.dotnet -- the M0 policy; a root-owned system SDK gets instructions instead, never auto-sudo) ---
 
 
 # The emscripten the repo is verified against -- one component of docs/wasm-toolchain.md's matched set. Audit-time drift tripwire only; real verification is always link-and-run per that doc.
@@ -158,13 +182,85 @@ def ensure_dotnet_wasm(dotnet: str) -> None:
         sys.exit(1)
     # Whole-token match: "wasm-tools-net8"/"-net9" are distinct down-level workload IDs and must not satisfy this check.
     if re.search(r"^wasm-tools(\s|$)", result.stdout, re.MULTILINE) is None:
-        print("--------")
-        print("Error: the .NET wasm-tools workload is not installed (needed to link the Rust staticlib into the wasm hosts).")
-        print("Two ways to fix it:")
-        print(f"  1. dotnet workload install wasm-tools   (needs sudo if the SDK is system-owned, e.g. under /usr/share/dotnet; this one is at {dotnet})")
-        print("  2. Remove the system dotnet from consideration (or just run this tool on a machine without one): the tool bootstrap will provision a user-local SDK into ~/.dotnet, where the workload install needs no admin rights.")
-        sys.exit(1)
+        sdk_root = os.path.dirname(os.path.realpath(dotnet))
+        if os.access(sdk_root, os.W_OK):
+            print("wasm-tools workload not installed; installing it into the user-writable SDK (no admin rights needed).")
+            util.run([dotnet, "workload", "install", "wasm-tools"], cwd=util.repo_root())
+        else:
+            print("--------")
+            print("Error: the .NET wasm-tools workload is not installed (needed to link the Rust staticlib into the wasm hosts).")
+            print("Two ways to fix it:")
+            print(f"  1. dotnet workload install wasm-tools   (needs sudo: the SDK at {sdk_root} is not writable by this user)")
+            print("  2. Remove the system dotnet from consideration (or just run this tool on a machine without one): the tool bootstrap will provision a user-local SDK into ~/.dotnet, where the workload install needs no admin rights.")
+            sys.exit(1)
     _warn_on_emscripten_drift(dotnet)
+
+
+def emsdk_env(dotnet: str) -> dict[str, str]:
+    """Environment for cargo invocations that link wasm executables: the workload's emscripten on PATH, configured exactly the way BrowserWasmApp.targets configures it (the pack's .emscripten config is entirely env-var-driven). Always the workload's emsdk, never a stray one -- the matched set (docs/wasm-toolchain.md) depends on it. Note the deliberate node split: emcc's internals run on the Node pack's node (DOTNET_EMSCRIPTEN_NODE_JS, same as the workload), while the test *runner* is PATH node -- the engine the wasm-desktop target actually ships on -- which is why the Node pack stays off PATH."""
+    packs = os.path.join(os.path.dirname(os.path.realpath(dotnet)), "packs")
+    sdk_major = _dotnet_major(dotnet)
+    rid = _dotnet_rid()
+    sdk_pack = _emscripten_pack_dir(packs, "Sdk", rid, sdk_major)
+    node_pack = _emscripten_pack_dir(packs, "Node", rid, sdk_major)
+    cache_pack = _emscripten_pack_dir(packs, "Cache", rid, sdk_major)
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join([os.path.join(sdk_pack, "tools", "emscripten"), os.path.join(sdk_pack, "tools", "bin"), env.get("PATH", "")])
+    env["DOTNET_EMSCRIPTEN_LLVM_ROOT"] = os.path.join(sdk_pack, "tools", "bin")
+    env["DOTNET_EMSCRIPTEN_BINARYEN_ROOT"] = os.path.join(sdk_pack, "tools")
+    env["DOTNET_EMSCRIPTEN_NODE_JS"] = os.path.join(node_pack, "tools", "bin", _exe("node"))
+    env["EM_CACHE"] = os.path.join(cache_pack, "tools", "emscripten", "cache")
+    env["EM_FROZEN_CACHE"] = "1"
+    env["PYTHONUTF8"] = "1"
+    env["EM_WORKAROUND_PYTHON_BUG_34780"] = "1"
+    # Emscripten defaults EXIT_RUNTIME=0, under which a browser-hosted exit() never fires Module.onExit -- and the browser test harness reads its pass/fail from exactly that hook (wasmbrowser.py's sentinel). Applied at link by emcc; rustc only uses emcc as the linker, so this can't leak into compiles.
+    env["EMCC_CFLAGS"] = "-sEXIT_RUNTIME=1"
+    return env
+
+
+def _dotnet_major(dotnet: str) -> int:
+    try:
+        result = subprocess.run([dotnet, "--version"], cwd=util.repo_root(), capture_output=True, text=True, timeout=120)
+    except (subprocess.TimeoutExpired, OSError):
+        result = None
+    if result is None or result.returncode != 0:
+        print("--------")
+        print(f"Error: `{dotnet} --version` failed; cannot determine the SDK major version for emscripten pack selection.")
+        sys.exit(1)
+    return int(result.stdout.strip().split(".")[0])
+
+
+def _dotnet_rid() -> str:
+    os_part = util.platformswitch(linux="linux", windows="win", mac="osx")
+    arch = {"x86_64": "x64", "AMD64": "x64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine())
+    if arch is None:
+        print("--------")
+        print(f"Error: unrecognized machine architecture {platform.machine()!r}; cannot locate emscripten packs.")
+        sys.exit(1)
+    return f"{os_part}-{arch}"
+
+
+def _emscripten_pack_dir(packs: str, kind: str, rid: str, sdk_major: int) -> str:
+    """Resolve one emscripten pack (Sdk/Node/Cache) at the pinned version: the highest pack-version dir whose major matches the resolved SDK's major -- packs carry version dirs for several SDK bands, and a cross-band pick would violate the matched set without tripping the version pin."""
+    pack_root = os.path.join(packs, f"Microsoft.NET.Runtime.Emscripten.{_EMSCRIPTEN_PIN}.{kind}.{rid}")
+    if not os.path.isdir(pack_root):
+        found = sorted(name for name in os.listdir(packs) if name.startswith("Microsoft.NET.Runtime.Emscripten.")) if os.path.isdir(packs) else []
+        print("--------")
+        print(f"Error: emscripten pack {os.path.basename(pack_root)} not found (the pinned emscripten {_EMSCRIPTEN_PIN} is part of the matched set in docs/wasm-toolchain.md).")
+        print(f"Emscripten packs present: {found or 'none'} -- if the pin moved, run the re-verification checklist and update _EMSCRIPTEN_PIN.")
+        sys.exit(1)
+    candidates: list[tuple[tuple[int, ...], str]] = []
+    for name in os.listdir(pack_root):
+        numbers = tuple(int(part) for part in name.split("-")[0].split(".") if part.isdigit())
+        if numbers and numbers[0] == sdk_major:
+            candidates.append((numbers, name))
+    if not candidates:
+        print("--------")
+        print(f"Error: {pack_root} has no pack-version dir matching SDK major {sdk_major} (found: {sorted(os.listdir(pack_root))}).")
+        sys.exit(1)
+    chosen = os.path.join(pack_root, max(candidates)[1])
+    print(f"emscripten {kind} pack: {chosen}")
+    return chosen
 
 
 def _warn_on_emscripten_drift(dotnet: str) -> None:

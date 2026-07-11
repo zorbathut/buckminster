@@ -21,7 +21,10 @@ pub struct FfiError {
 
 impl FfiError {
     pub fn new(code: FfiCode, message: impl Into<String>) -> FfiError {
-        FfiError { code, message: message.into() }
+        FfiError {
+            code,
+            message: message.into(),
+        }
     }
 }
 
@@ -59,7 +62,10 @@ pub fn guard(body: impl FnOnce() -> Result<(), FfiError>) -> i32 {
         }
         Ok(Err(error)) => {
             // An FfiError carrying Ok would report success to the caller while storing an error message, silently breaking "null means the last call succeeded".
-            debug_assert!(error.code != FfiCode::Ok, "FfiError constructed with FfiCode::Ok");
+            debug_assert!(
+                error.code != FfiCode::Ok,
+                "FfiError constructed with FfiCode::Ok"
+            );
             store_error(error.message);
             error.code as i32
         }
@@ -91,7 +97,14 @@ mod tests {
     use super::*;
 
     fn stored_error() -> Option<String> {
-        LAST_ERROR.with(|slot| slot.borrow().as_ref().map(|message| message.to_str().expect("stored messages are valid UTF-8").to_string()))
+        LAST_ERROR.with(|slot| {
+            slot.borrow().as_ref().map(|message| {
+                message
+                    .to_str()
+                    .expect("stored messages are valid UTF-8")
+                    .to_string()
+            })
+        })
     }
 
     #[test]

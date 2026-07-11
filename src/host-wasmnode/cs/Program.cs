@@ -1,17 +1,16 @@
 using System;
-using Buckminster.Ffi;
+using Buckminster.Tests;
 
 namespace Buckminster.Host.WasmNode;
 
-// The Node-hosted wasm host (the wasm-desktop run target). Until M3's in-host test runner arrives, its whole job is printing the FFI smoke lines to the terminal -- proof the Rust staticlib linked and runs.
+// The Node-hosted wasm host (the wasm-desktop run target). Its M3 job is running the C# test suite in-host and carrying the result out through the process exit code (runMainAndExit in main.mjs) -- Environment.Exit is broken under wasm, the return value is not. This Main reverts to actual hosting when M4 gives it an engine to host.
 internal static class Program
 {
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "WasmHost.props publishes untrimmed (PublishTrimmed=false) and roots this assembly besides; no fixture can be trimmed away")]
     private static int Main()
     {
-        foreach (string line in FfiSmoke.Run())
-        {
-            Console.WriteLine(line);
-        }
-        return 0;
+        (int failures, string report) = RunnerMini.Run(typeof(Program).Assembly);
+        Console.WriteLine(report);
+        return failures > 0 ? 1 : 0;
     }
 }

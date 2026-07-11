@@ -1,14 +1,15 @@
-// Browser entry point (template-shaped, .NET 10 wasmbrowser): boot the runtime, run the FFI smoke test, render the result into the page. A failure must land on the PAGE, not just the console -- this page's whole job is being looked at.
+// Browser entry point: boot the runtime, run the in-host test suite, render the report into the page. The final report line is the driver's sentinel (BUCK-TEST-EXIT:<code>); a page failure must land on the PAGE too, never just the console -- and the catch path appends its own failing sentinel so the driver sees a loud failure, not a timeout.
 import { dotnet } from './_framework/dotnet.js'
 
-const out = document.getElementById('out');
+// buckTestOut, not "out": defensive habit from the Rust harness, where emscripten's global `var out` clobbered the page's variable.
+const buckTestOut = document.getElementById('out');
 try {
     const { getAssemblyExports, getConfig, runMain } = await dotnet.create();
     const exports = await getAssemblyExports(getConfig().mainAssemblyName);
-    out.innerText = exports.Buckminster.Host.Web.ExportsSmoke.RunSmoke();
+    buckTestOut.textContent = exports.Buckminster.Host.Web.ExportsTest.RunTests();
     await runMain();
 } catch (error) {
-    out.innerText = 'FFI smoke test FAILED:\n' + error;
-    out.style.color = 'red';
+    buckTestOut.textContent = 'in-host test run FAILED:\n' + error + '\nBUCK-TEST-EXIT:1';
+    buckTestOut.style.color = 'red';
     throw error;
 }

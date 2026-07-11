@@ -1,0 +1,3 @@
+# Wasm test executables run under PATH node -- the wasm-desktop target's engine (the matched-set Node dimension, docs/wasm-toolchain.md). No linker key: rustc's emscripten target defaults to emcc-from-PATH, which `./tool.bat test-all` provides from the workload pack via emsdk_env (a bare `cargo test --target wasm32-unknown-emscripten` outside the tool fails loudly at link -- use the tool).
+[target.wasm32-unknown-emscripten]
+runner = "node"

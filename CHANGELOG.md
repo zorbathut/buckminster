@@ -19,6 +19,18 @@ All notable changes to this project will be documented in this file.
 - Toolchain audit now checks the .NET wasm-tools workload (instructions on failure, warn-only emscripten drift tripwire); `rust-toolchain.toml` pins the wasm target so rustup auto-installs it.
 - `./tool.bat test` passes `--no-build` to `dotnet test` (SCons already built the identical configuration; previously the solution built twice per test run).
 - `./tool.bat serve`: build, then run the browser host's dev server until Ctrl+C — the one-command way to see the wasm build in an actual browser (it prints the URL to open).
+- Tests on every target (M3): `./tool.bat test-all` runs both languages on all three run targets — Rust via `cargo test` (native), the Node cargo runner (wasm-desktop), and a generated DOM-sentinel page in headless Chrome driven over CDP (web); C# via `dotnet test` (native) and RunnerMini, the in-host reflection runner compiled into both wasm hosts (NUnitLite was rejected for wasm: threads/Console/Environment.Exit blockers). Per-target summary table, nonzero exit on any failure; every cell's failure path was proven with a deliberately-failing test. `./tool.bat test` remains the quick native slice.
+- RunnerMini (`src/stdcs/tests/RunnerMini.cs`): supports exactly `[TestFixture]`/`[Test]` and hard-errors on any other NUnit attribute or result state anywhere in the assembly, so new test features can never silently no-op on the wasm targets.
+- `./tool.bat check` now also runs `cargo fmt --check` and `cargo clippy -D warnings` (the M3 gates; `rust-toolchain.toml` pins the clippy/rustfmt components so fresh machines get them), and no longer forwards arguments.
+- CI workflow (`.github/workflows/ci.yml`): ubuntu-24.04, Node 20 pinned, wasm-tools workload install, `check` + `test-all`. Never yet executed — the repo has no GitHub remote; validated by inspection, steps byte-identical to locally-proven commands.
+- Toolchain audits: node presence (hard) + major-version tripwire (warn, pin v20); the wasm-tools workload now auto-installs when the SDK root is user-writable (closing the M2 deviation from the auto-provision policy).
+- `toolchains.emsdk_env()`: cargo wasm links now run against the workload's emscripten, configured exactly as the .NET build configures it (env-var mirror of BrowserWasmApp.targets, SDK-major-matched pack selection, `-sEXIT_RUNTIME=1`).
+
+### Improved
+
+- `global.json` `rollForward` tightened from `latestFeature` to `latestPatch`: the SDK feature band is part of the verified matched set (a band jump changes the bundled emscripten), so band bumps are now deliberate edits followed by the re-verification checklist.
+- The wasm hosts are in-host test runners until M4 gives them an engine to host: `FfiSmoke` is removed (its coverage was a subset of FfiTests, which now run on every target), the hosts compile the test sources in as linked files, publish untrimmed (`WasmHost.props`), and the emcc link optimization is pinned to `-O1` unconditionally (Debug publish runs the wasm-opt pass too).
+- Rust exports with out-params (`buck_add`, `buck_callback_invoke`) are now `unsafe extern "C"` with documented safety contracts (clippy's `not_unsafe_ptr_arg_deref`); the C ABI and C# side are unchanged. The Rust tree is now rustfmt-formatted.
 
 ### Fixed
 

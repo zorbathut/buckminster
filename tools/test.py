@@ -1,4 +1,4 @@
-"""`./tool.bat test` -- build, then run the Rust and C# test suites. (The full multi-target matrix lands in M3; this is the native slice.)"""
+"""`./tool.bat test` -- build, then run the Rust and C# test suites natively: the quick slice. The full multi-target matrix is `./tool.bat test-all`."""
 
 import os
 import sys

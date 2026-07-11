@@ -7,9 +7,9 @@ The Rust core reaches the two wasm run targets by being built as a `wasm32-unkno
 | Component | Pinned at | Pinned by | Coupling |
 |---|---|---|---|
 | rustc | 1.96.1 | `src/rust-toolchain.toml` | Ships a *prebuilt* `wasm32-unknown-emscripten` std, built against rustc-CI's own emscripten (newer than ours); emits wasm-EH unwinding by default under `panic=unwind` (Rust ≥ 1.93), and stamps LLVM `target_features` metadata newer binaryen tools understand but older ones reject |
-| .NET SDK | 10.0.1xx (`rollForward: latestFeature`) + wasm-tools workload (manifest 10.0.105) | `global.json`; workload audited by `tools/lib/toolchains.py` | Owns the final emcc link of `dotnet.native.wasm`; `WasmEnableExceptionHandling=true` (pinned in `src/WasmHost.props`) must agree with the Rust EH mode |
+| .NET SDK | 10.0.1xx (`rollForward: latestPatch` — the feature band is itself a matched-set dimension) + wasm-tools workload (manifest 10.0.105) | `global.json`; workload auto-provisioned/audited by `tools/lib/toolchains.py` | Owns the final emcc link of `dotnet.native.wasm`; `WasmEnableExceptionHandling=true` (pinned in `src/WasmHost.props`) must agree with the Rust EH mode |
 | Emscripten | 3.1.56 (the workload's bundled pack) | Comes with the workload; drift tripwire in `toolchains.py` (`_EMSCRIPTEN_PIN`) | Its wasm-ld does the link; its binaryen (wasm-opt) is *older* than rustc's LLVM — see the symbol-map exclusion below |
-| Node | v20 (PATH) | Not formally pinned yet (M3 CI will) | The wasm-desktop host engine. Its V8 supports the legacy wasm-EH flavor but not exnref; a rustc bump that changes the emitted EH *flavor* can break the Node host while the browser (current Chrome supports both) still works |
+| Node | v20 (PATH) | `_NODE_PIN` warn-tripwire in `tools/lib/toolchains.py` (presence is a hard audit); CI pins via setup-node@20 | The wasm-desktop host engine and the cargo wasm test runner. Its V8 supports the legacy wasm-EH flavor but not exnref; a rustc bump that changes the emitted EH *flavor* can break the Node host while the browser (current Chrome supports both) still works |
 
 **What landed at M2: probe rung A** — prebuilt std, `panic=unwind`, default wasm-EH, .NET defaults. `catch_unwind` panic containment **works on wasm**, on both hosts; the M1 FFI rails hold everywhere. Rungs B (`-Cpanic=abort`) and C (nightly `-Zbuild-std` against the workload emsdk) were prepared but never needed. No `EmccExtraLDFlags` are in use: the link produced no duplicate-symbol or setjmp/longjmp failures.
 
@@ -29,9 +29,9 @@ The browser host has no server side. `WasmAppHost` (what `./tool.bat serve` / `d
 
 `$DOTNET_ROOT/packs/Microsoft.NET.Runtime.Emscripten.<version>.Sdk.<rid>/<packver>/tools/emscripten` — on this machine: `/usr/share/dotnet/packs/Microsoft.NET.Runtime.Emscripten.3.1.56.Sdk.linux-x64/10.0.5/tools/emscripten` (with sibling `.Node` and `.Cache` packs). Enumerate with `ls $DOTNET_ROOT/packs | grep Emscripten` or `dotnet workload list` for the manifest version.
 
-**cargo does not need emcc for the staticlib** — an archive has no link step, which is why `build-rust-wasm` works with no emsdk on PATH. The moment cargo must link a wasm *executable* (M3: `cargo test --target wasm32-unknown-emscripten`), cargo becomes a second emsdk consumer and must resolve **the workload's** emsdk, not a stray `~/emsdk`: prepend the pack's `tools/emscripten` dir to PATH for those invocations (wired into the tooling at M3, not before).
+**cargo does not need emcc for the staticlib** — an archive has no link step, which is why `build-rust-wasm` works with no emsdk on PATH. Linking wasm *executables* (`cargo test --target wasm32-unknown-emscripten`) makes cargo a second emsdk consumer, wired at M3 as `toolchains.emsdk_env()`: the pack's `.emscripten` config is entirely env-var-driven, so the function mirrors exactly what `BrowserWasmApp.targets` sets — PATH prepend of `<Sdk>/tools/emscripten` + `<Sdk>/tools/bin`, `DOTNET_EMSCRIPTEN_LLVM_ROOT`/`BINARYEN_ROOT`/`NODE_JS`, `EM_CACHE` (the Cache pack, frozen), `PYTHONUTF8` — plus `EMCC_CFLAGS=-sEXIT_RUNTIME=1`, without which a browser-hosted `exit()` never fires `Module.onExit` and the browser harness sees no sentinel. Pack-version dirs are selected by matching the resolved SDK's major version (packs carry dirs for several bands; a cross-band pick would violate the matched set without tripping the pin check). Note the deliberate node split: emcc's internals run on the Node *pack's* node (as the workload does); the test *runner* is PATH node — the engine the product ships on — via `src/.cargo/config.toml`'s `runner = "node"`. A bare `cargo test --target wasm32-unknown-emscripten` outside the tool fails loudly at link (no emcc); use `./tool.bat test-all`.
 
-Also deferred to M3: the M0 policy says workloads are auto-provisioned, but M2 only *audits* wasm-tools (`ensure_dotnet_wasm`) — a system-owned SDK needs sudo for workload installs and .NET 10 workload-set scripting has footguns; the M3 CI fresh-machine story is the right time to close that gap.
+The M2 audit-only deviation is closed in code: `ensure_dotnet_wasm` now auto-installs the wasm-tools workload when the SDK root is user-writable (the bootstrap's own `~/.dotnet` — the M0 policy path) and still instructs-and-exits for root-owned system SDKs (never auto-sudo; CI uses an explicit sudo step). Honesty note: the auto-install branch is code-reviewed but not yet exercised — this machine's SDK is system-owned with the workload preinstalled, and CI (itself unexercised) takes the sudo path; its first real run is a fresh machine without a system SDK.
 
 ## Template channel
 
@@ -40,9 +40,8 @@ The host projects were hand-written against the shapes generated by `dotnet new 
 ## Re-verification checklist (run on ANY bump of any component)
 
 1. `./tool.bat build` — the wasm hosts' emcc link is part of the default build; a set mismatch should fail here, at walking-skeleton size.
-2. `dotnet run` in `src/host-wasmnode/cs` — all FfiSmoke lines correct in the terminal, **including panic containment** (it pins the EH mode agreement).
-3. `./tool.bat serve` (or `dotnet run` in `src/host-web/cs`) — same lines rendered in the page (headless: `google-chrome-stable --headless=new --virtual-time-budget=15000 --dump-dom <url>`); a failure renders in red on the page, not just the console.
-4. If anything fails, diagnose against the glossary below, and record any new failure class here.
+2. `./tool.bat test-all` — the full matrix, all six cells green; the wasm cells include panic containment (which pins the EH mode agreement) and the callback round trip on every target.
+3. If anything fails, diagnose against the glossary below, and record any new failure class here.
 5. On a rustc bump specifically: re-check the Node host separately from the browser (EH-flavor divergence hits Node first), and try removing any `EmccExtraLDFlags` workarounds that may have accreted (none yet) — they mask exactly the class of error a bump can introduce.
 
 ## Failure-class glossary
@@ -57,3 +56,6 @@ The host projects were hand-written against the shapes generated by `dotnet new 
 | Abort in `mono_wasm_get_interp_to_native_trampoline` | Unmappable parameter type in a pinvoke signature (fn pointers) | IntPtr at the boundary (see fix 3) |
 | Fails on Node, works in browser | Engine wasm-EH *flavor* support (exnref vs legacy), not sysroot drift | Check Node version / V8 features before blaming the link |
 | Signature-mismatch trap at call time | Rust export and C# import disagree on ABI | Fix the binding; the layout-assertion tests (M4) narrow struct cases |
+| Browser page runs but `Module.onExit` never fires | `EXIT_RUNTIME=0` (emscripten's default): `exit()` keeps the runtime alive without the hook | `-sEXIT_RUNTIME=1` at link (`emsdk_env` sets it via `EMCC_CFLAGS`) |
+| An `EMCC_CFLAGS` change doesn't take effect | cargo doesn't fingerprint that env var, so the old link artifact is reused | Touch the crate root (or `cargo clean` the wasm target) after changing link flags |
+| Browser page runs but produces no output | A page global collided with emscripten's own globals (`out`/`err` are its print functions) | Don't name page variables `out`/`err`; see the harness template in `tools/lib/wasmbrowser.py` |
