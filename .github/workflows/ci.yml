@@ -1,6 +1,6 @@
 # CI: the M3 test matrix on Linux.
 #
-# HONESTY NOTE: this repo has no GitHub remote yet, so this workflow has never executed. It is validated by inspection, and every step is byte-identical to commands proven locally; its first real run (and any fixups) happen when a remote exists.
+# First executed 2026-07-11 (run 29169258662): green on the first try, all six matrix cells, ~2m15s.
 #
 # Discipline notes:
 # - Do NOT add raw cargo steps here: rustup resolves rust-toolchain.toml from the invocation cwd, and a root-cwd cargo call silently uses the runner's default toolchain instead of the pin. All cargo invocations belong inside the tools (they run with cwd=src/).
@@ -15,11 +15,11 @@ jobs:
   test-all:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      # Node 20 is the pinned matched-set dimension (docs/wasm-toolchain.md): it hosts the wasm-desktop target and runs the wasm test suites. The runner's default node is newer.
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      # Node 24 is the pinned matched-set dimension (docs/wasm-toolchain.md): it hosts the wasm-desktop target and runs the wasm test suites. Pinned explicitly rather than trusting the runner default, which changes under us.
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
       - name: Install the wasm-tools workload
         run: sudo dotnet workload install wasm-tools
       - name: Static gates (pyright strict, rustfmt, clippy)

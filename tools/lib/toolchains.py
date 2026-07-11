@@ -144,7 +144,7 @@ def _install_rustup() -> None:
 
 
 # The node major version the wasm targets are verified against -- the Node row of docs/wasm-toolchain.md's matched set. Warn-only tripwire: newer V8s change wasm-EH flavor support, the "fails on Node, works in browser" glossary class.
-_NODE_PIN = 20
+_NODE_PIN = 24
 
 
 def ensure_node() -> None:
@@ -152,7 +152,7 @@ def ensure_node() -> None:
     if node is None:
         print("--------")
         print("Error: node not found on PATH (it hosts the wasm-desktop target and runs the wasm test suites).")
-        print("Install Node 20 from https://nodejs.org/ or your package manager (Arch: sudo pacman -S nodejs; Ubuntu/Debian: sudo apt install nodejs).")
+        print("Install Node 24 from https://nodejs.org/ or your package manager (Arch: sudo pacman -S nodejs-lts-krypton; Ubuntu/Debian: sudo apt install nodejs).")
         sys.exit(1)
     try:
         result = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=30)
