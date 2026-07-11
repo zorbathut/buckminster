@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 - `docs/wasm-toolchain.md`: the four-component matched set (rustc / .NET SDK+workload / emscripten / Node), the failure classes actually hit at M2 with their fixes, workload-emsdk discovery, the template channel, and the bump re-verification checklist.
 - Toolchain audit now checks the .NET wasm-tools workload (instructions on failure, warn-only emscripten drift tripwire); `rust-toolchain.toml` pins the wasm target so rustup auto-installs it.
 - `./tool.bat test` passes `--no-build` to `dotnet test` (SCons already built the identical configuration; previously the solution built twice per test run).
+- `./tool.bat serve`: build, then run the browser host's dev server until Ctrl+C — the one-command way to see the wasm build in an actual browser (it prints the URL to open).
 
 ### Fixed
 
