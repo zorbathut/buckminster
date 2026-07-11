@@ -4,6 +4,7 @@ import dataclasses
 import json
 import os
 import platform
+import re
 import shutil
 import stat
 import subprocess
@@ -22,7 +23,10 @@ class Toolchains:
 
 def ensure_toolchains() -> Toolchains:
     ensure_cc()
-    return Toolchains(cargo=ensure_cargo(), dotnet=ensure_dotnet())
+    cargo = ensure_cargo()
+    dotnet = ensure_dotnet()
+    ensure_dotnet_wasm(dotnet)
+    return Toolchains(cargo=cargo, dotnet=dotnet)
 
 
 def _exe(name: str) -> str:
@@ -133,6 +137,47 @@ def _install_rustup() -> None:
         os.chmod(installer, os.stat(installer).st_mode | stat.S_IXUSR)
         # No default toolchain: rustup auto-installs the rust-toolchain.toml pin (with its components/targets) on first cargo use, and any other toolchain would just be a second multi-hundred-MB download nothing uses. Minimal profile: rustc/cargo/std only.
         util.run([installer, "-y", "--no-modify-path", "--profile", "minimal", "--default-toolchain", "none"])
+
+
+# --- .NET wasm workload (audit-and-instruct -- a recorded M2 deviation from the M0 auto-provision policy: a system-owned SDK needs sudo for workload installs, and .NET 10 workload-set scripting has footguns better solved alongside M3's CI fresh-machine story; revisit then) ---
+
+
+# The emscripten the repo is verified against -- one component of docs/wasm-toolchain.md's matched set. Audit-time drift tripwire only; real verification is always link-and-run per that doc.
+_EMSCRIPTEN_PIN = "3.1.56"
+
+
+def ensure_dotnet_wasm(dotnet: str) -> None:
+    """Audit that the wasm-tools workload is installed (it supplies the emscripten that links the Rust staticlib into the wasm hosts). Costs a ~1s `dotnet workload list` per tool invocation; acceptable until it isn't."""
+    try:
+        result = subprocess.run([dotnet, "workload", "list"], cwd=util.repo_root(), capture_output=True, text=True, timeout=120)
+    except (subprocess.TimeoutExpired, OSError):
+        result = None
+    if result is None or result.returncode != 0:
+        print("--------")
+        print(f"Error: `{dotnet} workload list` failed; cannot verify the wasm-tools workload. Check the .NET SDK installation.")
+        sys.exit(1)
+    # Whole-token match: "wasm-tools-net8"/"-net9" are distinct down-level workload IDs and must not satisfy this check.
+    if re.search(r"^wasm-tools(\s|$)", result.stdout, re.MULTILINE) is None:
+        print("--------")
+        print("Error: the .NET wasm-tools workload is not installed (needed to link the Rust staticlib into the wasm hosts).")
+        print("Two ways to fix it:")
+        print(f"  1. dotnet workload install wasm-tools   (needs sudo if the SDK is system-owned, e.g. under /usr/share/dotnet; this one is at {dotnet})")
+        print("  2. Remove the system dotnet from consideration (or just run this tool on a machine without one): the tool bootstrap will provision a user-local SDK into ~/.dotnet, where the workload install needs no admin rights.")
+        sys.exit(1)
+    _warn_on_emscripten_drift(dotnet)
+
+
+def _warn_on_emscripten_drift(dotnet: str) -> None:
+    # Warn-only: a version-string mismatch is a heads-up to re-run the docs/wasm-toolchain.md checklist, not proof of breakage (and a match is not proof of health -- link-and-run is).
+    packs = os.path.join(os.path.dirname(os.path.realpath(dotnet)), "packs")
+    if not os.path.isdir(packs):
+        return
+    found: list[str] = []
+    for name in os.listdir(packs):
+        if name.startswith("Microsoft.NET.Runtime.Emscripten.") and ".Sdk" in name:
+            found.append(name.removeprefix("Microsoft.NET.Runtime.Emscripten.").split(".Sdk")[0])
+    if found and _EMSCRIPTEN_PIN not in found:
+        print(f"Warning: the SDK's emscripten pack(s) {sorted(set(found))} differ from the verified pin {_EMSCRIPTEN_PIN}; run the re-verification checklist in docs/wasm-toolchain.md.")
 
 
 # --- .NET SDK (auto-provision user-local; the pin lives in global.json) ---

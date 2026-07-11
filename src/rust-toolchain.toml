@@ -1,3 +1,5 @@
-# Exact-version pin, honored because the tool entry point always resolves cargo through rustup (tools/toolchains.py). Bumps are deliberate: update the version, rebuild everything, run the full test matrix. The wasm32-unknown-emscripten target gets added here in M2.
+# Exact-version pin, honored because the tool entry point always resolves cargo through rustup (tools/toolchains.py). Bumps are deliberate: update the version, rebuild everything, run the full test matrix per docs/wasm-toolchain.md's checklist -- rustc is one component of the matched rustc/emsdk/.NET/Node set pinned there.
 [toolchain]
 channel = "1.96.1"
+# rustup auto-installs listed targets on first cargo use, so the wasm target needs no provisioning code.
+targets = ["wasm32-unknown-emscripten"]

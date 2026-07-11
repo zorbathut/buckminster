@@ -2,4 +2,6 @@
     <Project Path="src/stdcs/cs/Buckminster.csproj" />
     <Project Path="src/stdcs/tests/Buckminster.Tests.csproj" />
     <Project Path="src/host-desktop/cs/Buckminster.Host.Desktop.csproj" />
+    <Project Path="src/host-web/cs/Buckminster.Host.Web.csproj" />
+    <Project Path="src/host-wasmnode/cs/Buckminster.Host.WasmNode.csproj" />
 </Solution>

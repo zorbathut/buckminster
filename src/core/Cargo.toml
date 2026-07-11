@@ -7,5 +7,5 @@ license = "MIT"
 # Module layout convention: language subdirs inside src/<module>/, so the crate root lives in rust/ rather than cargo's default src/.
 [lib]
 path = "rust/lib.rs"
-# cdylib is what C# loads; rlib is for integration tests and future dependent crates (in-crate unit tests work without it). staticlib joins in M2 for the emscripten link.
+# cdylib is what C# loads natively; rlib is for integration tests and future dependent crates (in-crate unit tests work without it). The emscripten staticlib is deliberately NOT listed: it's produced per-invocation via `cargo rustc --crate-type staticlib` (build-rust-wasm), because listing it here would make wasm builds also attempt the cdylib link, which needs emcc at cargo time -- an archive needs no linker at all.
 crate-type = ["cdylib", "rlib"]

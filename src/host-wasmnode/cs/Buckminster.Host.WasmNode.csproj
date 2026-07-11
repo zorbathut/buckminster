@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- The wasm-desktop target: the same browser-wasm build the web host uses, hosted by Node (see runtimeconfig.template.json). Project shape follows the wasmconsole template (plain Microsoft.NET.Sdk + WasmMainJSPath, NOT Microsoft.NET.Sdk.WebAssembly, which is the browser-app variant). -->
+    <Import Project="../../WasmHost.props" />
+
+    <PropertyGroup>
+        <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+        <OutputType>Exe</OutputType>
+        <WasmMainJSPath>main.mjs</WasmMainJSPath>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../../stdcs/cs/Buckminster.csproj" />
+    </ItemGroup>
+
+</Project>

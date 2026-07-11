@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+
+    <!-- The browser host. Project shape follows the wasmbrowser template (.NET 10): the WebAssembly SDK implies browser-wasm + Exe; the placeholder/fingerprint bits are how the template wires index.html to the built assets. -->
+    <Import Project="../../WasmHost.props" />
+
+    <PropertyGroup>
+        <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
+        <!-- The [JSExport] source generator emits unsafe code (SYSLIB1075 makes this mandatory, not stylistic). -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <StaticWebAssetFingerprintPattern Include="JS" Pattern="*.js" Expression="#[.{fingerprint}]!" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../../stdcs/cs/Buckminster.csproj" />
+    </ItemGroup>
+
+</Project>

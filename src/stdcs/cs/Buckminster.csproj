@@ -8,8 +8,10 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- Raw FFI stays internal, never public API; tests reach it through this. -->
+        <!-- Raw FFI stays internal, never public API; tests and the walking-skeleton hosts reach it through these. The host entries die with FfiSmoke at M3. -->
         <InternalsVisibleTo Include="Buckminster.Tests" />
+        <InternalsVisibleTo Include="Buckminster.Host.Web" />
+        <InternalsVisibleTo Include="Buckminster.Host.WasmNode" />
         <!-- None + CopyToOutputDirectory flows transitively through ProjectReference, so test and host projects get the native library with no wiring of their own. -->
         <None Include="$(BuckNativeLibrary)" Link="libbuckminster_core.so" CopyToOutputDirectory="PreserveNewest" Visible="false" />
     </ItemGroup>

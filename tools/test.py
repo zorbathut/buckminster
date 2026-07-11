@@ -19,8 +19,8 @@ def run(args: list[str]) -> None:
     util.run(["scons"], cwd=util.repo_root(), env=env)
     # cwd src/: cargo workspace + rust-toolchain.toml discovery, same as the build target.
     util.run([tc.cargo, "test", "--workspace"], cwd=os.path.join(util.repo_root(), "src"))
-    # Microsoft.Testing.Platform mode (opted into via global.json "test.runner" -- the .NET 10 SDK offers no per-project alternative); its CLI takes --solution, not a bare path.
-    util.run([tc.dotnet, "test", "--solution", "Buckminster.slnx"], cwd=util.repo_root())
+    # Microsoft.Testing.Platform mode (opted into via global.json "test.runner" -- the .NET 10 SDK offers no per-project alternative); its CLI takes --solution, not a bare path. --no-build: scons just built this exact configuration, and rebuilding would also re-run the wasm hosts' emcc link.
+    util.run([tc.dotnet, "test", "--solution", "Buckminster.slnx", "--no-build"], cwd=util.repo_root())
 
 
 if __name__ == "__main__":

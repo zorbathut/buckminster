@@ -121,7 +121,7 @@ public class FfiTests
     {
         CallbackTarget target = new CallbackTarget();
         ulong key = CallbackTable.Register(target);
-        FfiCode code = NativeMethods.buck_callback_invoke(&CallbackDouble, key, 21, out int result);
+        FfiCode code = NativeMethods.buck_callback_invoke((IntPtr)(delegate* unmanaged<ulong, int, int*, int>)&CallbackDouble, key, 21, out int result);
         CallbackTable.Unregister(key);
 
         Assert.That(code, Is.EqualTo(FfiCode.Ok));
@@ -134,7 +134,7 @@ public class FfiTests
     public unsafe void CallbackExceptionIsContained()
     {
         CallbackExceptionStash.Take();
-        FfiCode code = NativeMethods.buck_callback_invoke(&CallbackThrows, 0, 5, out _);
+        FfiCode code = NativeMethods.buck_callback_invoke((IntPtr)(delegate* unmanaged<ulong, int, int*, int>)&CallbackThrows, 0, 5, out _);
 
         Assert.That(code, Is.EqualTo(FfiCode.CallbackError));
         Assert.That(NativeMethods.LastErrorMessage(), Does.Contain("callback returned error code 1"));
@@ -154,7 +154,7 @@ public class FfiTests
     {
         // Pins guard nesting: a callback calling back into buck_* on the same thread is the normal future state (PLAN.md: callbacks used freely), not an edge case. The pre-existing error proves nested success handles LAST_ERROR sanely.
         NativeMethods.buck_test_panic();
-        FfiCode code = NativeMethods.buck_callback_invoke(&CallbackReenters, 0, 5, out int result);
+        FfiCode code = NativeMethods.buck_callback_invoke((IntPtr)(delegate* unmanaged<ulong, int, int*, int>)&CallbackReenters, 0, 5, out int result);
 
         Assert.That(code, Is.EqualTo(FfiCode.Ok));
         Assert.That(result, Is.EqualTo(15));

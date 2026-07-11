@@ -11,8 +11,9 @@ internal static partial class NativeMethods
     [LibraryImport(Library)]
     internal static partial FfiCode buck_add(int a, int b, out int sum);
 
+    // The callback crosses as IntPtr, not delegate* unmanaged<ulong, int, int*, int>: mono's wasm interp-to-native path cannot map function-pointer parameter types (type_to_c in aot-runtime-wasm.c aborts on them -- the dotnet/runtime #56145 class), and the two representations are ABI-identical. Call sites cast through the full delegate type -- (IntPtr)(delegate* unmanaged<ulong, int, int*, int>)&TheCallback -- deliberately: that re-asserts the callback signature at every call site, so a signature drift is a compile error instead of a runtime trap.
     [LibraryImport(Library)]
-    internal static unsafe partial FfiCode buck_callback_invoke(delegate* unmanaged<ulong, int, int*, int> callback, ulong userdata, int value, out int result);
+    internal static partial FfiCode buck_callback_invoke(IntPtr callback, ulong userdata, int value, out int result);
 
     [LibraryImport(Library)]
     internal static partial FfiCode buck_test_panic();

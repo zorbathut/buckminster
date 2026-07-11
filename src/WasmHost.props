@@ -1,0 +1,20 @@
+<Project>
+    <PropertyGroup>
+        <!-- The EH mode is one dimension of the pinned rustc/emsdk/.NET/Node matched set (docs/wasm-toolchain.md): the Rust staticlib is built panic=unwind, which emits wasm-EH by default since Rust 1.93, and the link only works while .NET agrees. Pinned explicitly because global.json's rollForward lets the SDK band drift under us; the default happening to match is not a pin. -->
+        <WasmEnableExceptionHandling>true</WasmEnableExceptionHandling>
+        <!-- rustc 1.96's LLVM stamps target_features (bulk-memory-opt, call-indirect-overlong) that the 3.1.56 pack's older wasm-opt rejects with "Unknown option". The symbol-map pass is the only wasm-opt in a Debug build, and the plain-SDK path defaults it ON (the WebAssembly-SDK path defaults it off), so disable it everywhere. Symptom and details in docs/wasm-toolchain.md; expect the same skew from any future wasm-opt pass (e.g. Release/AOT optimization). -->
+        <WasmEmitSymbolMap>false</WasmEmitSymbolMap>
+        <!-- Same wasm-opt skew, publish flavor: Release defaults the emcc link to -O2, whose wasm-opt pass rejects our archive's newer target_features. -O1 skips wasm-opt entirely; the optimization loss is accepted until the LLVM/binaryen gap closes (docs/wasm-toolchain.md). -->
+        <EmccLinkOptimizationFlag Condition="'$(Configuration)' == 'Release'">-O1</EmccLinkOptimizationFlag>
+        <!-- buckminster_core.a, not cargo's libbuckminster_core.a: DllImport("buckminster_core") only resolves to statically-linked code when the module name matches a linked file's name, and the lib prefix is not stripped in that match; an unmatched name silently becomes an external wasm import that fails at runtime. build-rust-wasm copies the archive to this name. -->
+        <BuckWasmStaticLib>$(MSBuildThisFileDirectory)target/wasm32-unknown-emscripten/debug/buckminster_core.a</BuckWasmStaticLib>
+    </PropertyGroup>
+    <ItemGroup>
+        <!-- NativeFileReference does not propagate through ProjectReference (dotnet/runtime #114724), so every wasm host must carry its own; this shared import beats copy-paste. -->
+        <NativeFileReference Include="$(BuckWasmStaticLib)" />
+    </ItemGroup>
+    <!-- Same loud-failure pattern as BuckCheckNativeLibrary in Buckminster.csproj, for the wasm staticlib. -->
+    <Target Name="BuckCheckWasmStaticLib" BeforeTargets="AssignTargetPaths" Condition="'$(DesignTimeBuild)' != 'true'">
+        <Error Condition="!Exists('$(BuckWasmStaticLib)')" Text="Wasm native library not found at $(BuckWasmStaticLib) -- run './tool.bat build' (or 'cargo rustc -p buckminster-core --target wasm32-unknown-emscripten --crate-type staticlib' with cwd src/) before building the wasm hosts." />
+    </Target>
+</Project>
