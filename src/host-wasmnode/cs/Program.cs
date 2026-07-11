@@ -9,7 +9,7 @@ internal static class Program
     [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "WasmHost.props publishes untrimmed (PublishTrimmed=false) and roots this assembly besides; no fixture can be trimmed away")]
     private static int Main()
     {
-        (int failures, string report) = RunnerMini.Run(typeof(Program).Assembly);
+        (int failures, string report) = RunnerWasm.Run(typeof(Program).Assembly);
         Console.WriteLine(report);
         return failures > 0 ? 1 : 0;
     }

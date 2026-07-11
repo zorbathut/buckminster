@@ -15,9 +15,13 @@ def _banner(name: str) -> None:
     print(f"======== {name} ========")
 
 
-def _run_section(command: list[str], cwd: str, env: dict[str, str] | None = None) -> bool:
+def _run_section(command: list[str], cwd: str, env: dict[str, str] | None = None, timeout: float | None = None) -> bool:
     print("Executing: " + " ".join(command))
-    return subprocess.run(command, cwd=cwd, env=env).returncode == 0
+    try:
+        return subprocess.run(command, cwd=cwd, env=env, timeout=timeout).returncode == 0
+    except subprocess.TimeoutExpired:
+        print(f"FAIL: timed out after {timeout}s (if this is the C# cell, the usual suspect is a genuinely-async test deadlocking under RunOnMainThread -- see RunnerWasm.cs)")
+        return False
 
 
 def _run_browser_page(chrome: str | None, serve_dir: str, page: str, label: str) -> bool:
@@ -56,7 +60,8 @@ def run(args: list[str]) -> None:
     results.append(("rust-native", _run_section([tc.cargo, "test", "--workspace"], cwd=src)))
 
     _banner("rust-wasm-node")
-    results.append(("rust-wasm-node", _run_section([tc.cargo, "test", "--workspace", "--target", "wasm32-unknown-emscripten"], cwd=src, env=emsdk)))
+    # The node cells get timeouts because a hung wasm runtime otherwise stalls the matrix (and CI) forever; the browser cells are already bounded by the CDP driver's own timeout.
+    results.append(("rust-wasm-node", _run_section([tc.cargo, "test", "--workspace", "--target", "wasm32-unknown-emscripten"], cwd=src, env=emsdk, timeout=600)))
 
     _banner("rust-wasm-browser")
     ok = True
@@ -80,7 +85,7 @@ def run(args: list[str]) -> None:
 
     _banner("cs-wasm-node")
     bundle = os.path.join(src, "host-wasmnode", "cs", "bin", "Debug", "net10.0", "browser-wasm", "AppBundle")
-    results.append(("cs-wasm-node", _run_section(["node", "main.mjs"], cwd=bundle)))
+    results.append(("cs-wasm-node", _run_section(["node", "main.mjs"], cwd=bundle, timeout=600)))
 
     _banner("cs-wasm-browser")
     # Publish is what produces static-servable files for the driver; untrimmed per WasmHost.props, and the emcc relink here is the matrix's long pole.

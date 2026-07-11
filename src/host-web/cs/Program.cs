@@ -22,7 +22,7 @@ public partial class ExportsTest
     internal static string RunTests()
     {
         // The final line is the driver's sentinel (tools/lib/wasmbrowser.py): the report ends with BUCK-TEST-EXIT:<0|1>.
-        (int failures, string report) = RunnerMini.Run(typeof(ExportsTest).Assembly);
+        (int failures, string report) = RunnerWasm.Run(typeof(ExportsTest).Assembly);
         return report + "\nBUCK-TEST-EXIT:" + (failures > 0 ? "1" : "0");
     }
 }

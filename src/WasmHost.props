@@ -14,7 +14,7 @@
     <ItemGroup>
         <!-- NativeFileReference does not propagate through ProjectReference (dotnet/runtime #114724), so every wasm host must carry its own; this shared import beats copy-paste. -->
         <NativeFileReference Include="$(BuckWasmStaticLib)" />
-        <!-- The in-host test suite (RunnerMini) reaches fixtures only via reflection; trimming one away would silently shrink the suite. -->
+        <!-- The in-host test suite (RunnerWasm) reaches fixtures only via reflection; trimming one away would silently shrink the suite. -->
         <TrimmerRootAssembly Include="$(AssemblyName)" />
     </ItemGroup>
     <!-- Same loud-failure pattern as BuckCheckNativeLibrary in Buckminster.csproj, for the wasm staticlib. -->
