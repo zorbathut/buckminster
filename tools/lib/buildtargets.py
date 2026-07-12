@@ -6,6 +6,7 @@ import subprocess
 
 from lib import sconsfacade
 from lib import util
+from lib import wasmnative
 
 
 def _tool_env(var: str) -> str:
@@ -37,8 +38,38 @@ def _build_rust_wasm() -> int:
     return 0
 
 
+_WASM_HOST_DIRS = [os.path.join("src", "host-wasmnode", "cs"), os.path.join("src", "host-web", "cs")]
+
+
+# The m2n staleness check, self-healing (docs/wasm-toolchain.md glossary; module doc in wasmnative.py). for-build pairs ONLY: `dotnet build` cannot refresh a for-publish binary, so checking those here would false-alarm; the publish step (test-all's browser cell) owns them.
+def _check_and_heal_m2n() -> int:
+    hosts = [os.path.join(util.repo_root(), host) for host in _WASM_HOST_DIRS]
+    for attempt in range(2):
+        pairs = [pair for host in hosts for pair in wasmnative.find_checkable_pairs(host, "build")]
+        if not pairs:
+            # Zero checkable pairs means the paths drifted (TFM bump, config change), not that everything is fine -- silent-green is the exact rot this check exists to prevent. host-wasmnode's for-build pair exists after every build today.
+            print("Error: the m2n staleness check found no checkable for-build pairs under either wasm host; the obj layout has drifted and the check needs updating (tools/lib/wasmnative.py)")
+            return 1
+        stale = [(pair, missing) for pair in pairs if (missing := wasmnative.find_stale_cookies(pair))]
+        if not stale:
+            return 0
+        for pair, missing in stale:
+            print(f"m2n staleness detected -- {wasmnative.describe_stale(pair, missing)}")
+        if attempt == 1:
+            print("Error: m2n staleness survived a forced full relink; this is not incremental staleness, it is a real bug")
+            return 1
+        wasmnative.delete_wasm_obj_dirs([host for host in hosts if any(pair.startswith(host) for pair, _ in stale)])
+        code = _run_in(util.repo_root(), [_tool_env("BUCK_DOTNET"), "build", "Buckminster.slnx"])
+        if code != 0:
+            return code
+    return 1
+
+
 def _build_dotnet() -> int:
-    return _run_in(util.repo_root(), [_tool_env("BUCK_DOTNET"), "build", "Buckminster.slnx"])
+    code = _run_in(util.repo_root(), [_tool_env("BUCK_DOTNET"), "build", "Buckminster.slnx"])
+    if code != 0:
+        return code
+    return _check_and_heal_m2n()
 
 
 def define() -> None:

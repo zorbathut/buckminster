@@ -8,6 +8,7 @@ import sys
 from lib import toolchains
 from lib import util
 from lib import wasmbrowser
+from lib import wasmnative
 
 
 def _banner(name: str) -> None:
@@ -88,8 +89,27 @@ def run(args: list[str]) -> None:
     results.append(("cs-wasm-node", _run_section(["node", "main.mjs"], cwd=bundle, timeout=600)))
 
     _banner("cs-wasm-browser")
-    # Publish is what produces static-servable files for the driver; untrimmed per WasmHost.props, and the emcc relink here is the matrix's long pole.
-    published = _run_section([tc.dotnet, "publish", os.path.join(src, "host-web", "cs", "Buckminster.Host.Web.csproj"), "-c", "Debug"], cwd=util.repo_root())
+    # Publish is what produces static-servable files for the driver; untrimmed per WasmHost.props, and the emcc relink here is the matrix's long pole. The publish owns the for-publish m2n pairs, so the staleness check-and-heal for them lives here (host-web only relinks at publish, making this its only m2n coverage; see tools/lib/wasmnative.py).
+    host_web = os.path.join(src, "host-web", "cs")
+    publish_command = [tc.dotnet, "publish", os.path.join(host_web, "Buckminster.Host.Web.csproj"), "-c", "Debug"]
+    published = _run_section(publish_command, cwd=util.repo_root())
+    if published:
+        pairs = wasmnative.find_checkable_pairs(host_web, "publish")
+        if not pairs:
+            # Same floor as the build-side check: zero checkable pairs after a successful publish means the obj layout drifted, and silent-green is the exact rot the check exists to prevent. This is host-web's ONLY m2n coverage.
+            print("FAIL: the m2n staleness check found no checkable for-publish pairs after a successful publish; the obj layout has drifted (tools/lib/wasmnative.py)")
+            published = False
+        stale_pairs = [(pair, missing) for pair in pairs if (missing := wasmnative.find_stale_cookies(pair))]
+        if published and stale_pairs:
+            for pair, missing in stale_pairs:
+                print(f"m2n staleness detected -- {wasmnative.describe_stale(pair, missing)}")
+            wasmnative.delete_wasm_obj_dirs([host_web])
+            published = _run_section(publish_command, cwd=util.repo_root())
+            if published:
+                pairs = wasmnative.find_checkable_pairs(host_web, "publish")
+                if not pairs or any(wasmnative.find_stale_cookies(pair) for pair in pairs):
+                    print("FAIL: m2n staleness survived a forced full re-publish; this is a real bug, not incremental staleness")
+                    published = False
     wwwroot = os.path.join(src, "host-web", "cs", "bin", "Debug", "net10.0", "publish", "wwwroot")
     results.append(("cs-wasm-browser", published and _run_browser_page(chrome, wwwroot, "index.html", "host-web test page")))
 
