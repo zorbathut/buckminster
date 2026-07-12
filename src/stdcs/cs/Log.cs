@@ -31,6 +31,12 @@ public static class Log
         Emit(LogLevel.Trace, message);
     }
 
+    // The "just log this exception" call (planefarer Dbg.Ex lineage): Error level, full ToString -- type, message, stack trace, inner exceptions.
+    public static void Ex(Exception exception)
+    {
+        Emit(LogLevel.Error, exception.ToString());
+    }
+
     private static void Emit(LogLevel level, string message)
     {
         // FfiCall rethrows a throwing log sink's exception right here -- at the causal call site, which is the point of exit-drain delivery.

@@ -248,6 +248,18 @@ public class LogPipelineTests
     }
 
     [Test]
+    public void ExLogsTheFullExceptionAtErrorLevel()
+    {
+        List<(LogLevel Level, string Message)> received = new List<(LogLevel, string)>();
+        using Engine engine = CreateEngine((level, message) => received.Add((level, message)));
+        Log.Ex(new InvalidOperationException("the thing broke"));
+        Assert.That(received, Has.Count.EqualTo(1));
+        Assert.That(received[0].Level, Is.EqualTo(LogLevel.Error));
+        Assert.That(received[0].Message, Does.Contain("InvalidOperationException"));
+        Assert.That(received[0].Message, Does.Contain("the thing broke"));
+    }
+
+    [Test]
     public void EmptyMessageIsSafe()
     {
         // C#'s fixed on an empty array pins NULL; the Rust side must handle (null, 0) without touching the pointer (from_raw_parts(null, 0) is a non-unwinding abort no guard can contain).
