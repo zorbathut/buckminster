@@ -9,6 +9,10 @@ namespace Buckminster;
 // The friendly C# face of the engine (PLAN.md tick-as-callee: hosts own the loop and call PumpEvents/Tick/Render; the engine never runs one). Wraps the Rust engine handle and owns the module registry. Create, register modules, then pump until IsReady; module init runs inside PumpEvents because init is async-shaped from the foundation up -- M4 completes it in one pump, but hosts must not assume that.
 public sealed class Engine : IDisposable
 {
+    // Backing field for Current; ThreadStatic can't ride an auto-property.
+    [ThreadStatic]
+    private static Engine? currentEngine;
+
     private ulong handle;
     private bool disposed;
     // The init lifecycle latches: started closes registration (including from inside a module's own Initialize), failed wedges the engine loudly -- re-pumping after a failed init would silently re-run the Initializes that succeeded before the failure.
@@ -17,6 +21,13 @@ public sealed class Engine : IDisposable
     private readonly ulong logSinkKey;
     private readonly List<IModule> modules = new List<IModule>();
     private readonly HashSet<Type> moduleTypes = new HashSet<Type>();
+
+    // The thread-local ambient engine (Ghi Environment.Current lineage; the future environment global composes with this rather than competing). PumpEvents/Tick/Render scope it to themselves with save-and-restore, so module callbacks and log-sink deliveries see the right engine without handle-threading; hosts may also set it directly. Per-thread by design: each thread driving its own engine sees its own Current, and single-threaded wasm is trivially correct. Unset reads are null -- the caller decides loudness (and the save/restore machinery itself must be able to read an unset value). Static lifecycle deliberately does not scope: Create has no instance yet, and Dispose's final tail delivery reports under the caller's ambient value (attribution through the shared process buffer is approximate regardless).
+    public static Engine? Current
+    {
+        get { return currentEngine; }
+        set { currentEngine = value; }
+    }
 
     public bool IsReady { get; private set; }
 
@@ -68,23 +79,32 @@ public sealed class Engine : IDisposable
     public void PumpEvents()
     {
         ThrowIfDisposed();
-        if (initFailed)
+        Engine? previous = currentEngine;
+        currentEngine = this;
+        try
         {
-            throw new InvalidOperationException("module initialization previously failed; the engine is unusable -- dispose it and create a fresh one");
+            if (initFailed)
+            {
+                throw new InvalidOperationException("module initialization previously failed; the engine is unusable -- dispose it and create a fresh one");
+            }
+            if (!IsReady)
+            {
+                initStarted = true;
+                try
+                {
+                    InitializeModules();
+                }
+                catch
+                {
+                    initFailed = true;
+                    throw;
+                }
+                IsReady = true;
+            }
         }
-        if (!IsReady)
+        finally
         {
-            initStarted = true;
-            try
-            {
-                InitializeModules();
-            }
-            catch
-            {
-                initFailed = true;
-                throw;
-            }
-            IsReady = true;
+            currentEngine = previous;
         }
     }
 
@@ -96,17 +116,36 @@ public sealed class Engine : IDisposable
             // The host idiom is pump-and-tick until Ready (PLAN.md async-shaped init), so a pre-Ready Tick is a harmless no-op, not an error: no module runs, no counter advances, sim tick 0 stays pinned to Ready.
             return;
         }
-        foreach (IModule module in modules)
+        Engine? previous = currentEngine;
+        currentEngine = this;
+        try
         {
-            module.Tick(this, dt);
+            foreach (IModule module in modules)
+            {
+                module.Tick(this, dt);
+            }
+            FfiCall.ThrowOnError(NativeMethods.buck_engine_tick(handle, dt, out _), "engine tick");
         }
-        FfiCall.ThrowOnError(NativeMethods.buck_engine_tick(handle, dt, out _), "engine tick");
+        finally
+        {
+            currentEngine = previous;
+        }
         TickCount += 1;
     }
 
     public void Render()
     {
-        // Deliberate no-op until the render layer exists (M6); the seam is the point (PLAN.md: Tick and Render are separate calls even though desktop always pairs them).
+        ThrowIfDisposed();
+        Engine? previous = currentEngine;
+        currentEngine = this;
+        try
+        {
+            // No render layer until M6; the seam is the point (PLAN.md: Tick and Render are separate calls even though desktop always pairs them). The Current scoping is already live so the M6 body inherits the contract instead of someone having to remember it.
+        }
+        finally
+        {
+            currentEngine = previous;
+        }
     }
 
     public void Dispose()
