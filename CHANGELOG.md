@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- C# `Engine` class (M4): `Create(config)` / `Dispose` (idempotent) / `PumpEvents` / `Tick(dt)` / `Render` (no-op until M6) — tick-as-callee, hosts own the loop. Module registry: `IModule` declares dependencies by concrete type; init runs in stable topological order (registration order as tiebreak) inside the first `PumpEvents`, which sets `IsReady`; tick runs in pure registration order. Pre-Ready `Tick` is a harmless no-op (the host idiom is pump-and-tick until Ready). Loud failures: dependency cycles name the cycle path, missing dependencies name both parties, duplicate concrete types and post-init registration are rejected. The desktop host now hosts the real engine.
 - Engine lifecycle across the FFI (M4): `buck_engine_create(config)` / `buck_engine_destroy` / `buck_engine_tick` against a Rust `Engine` owned by a registry whose handles are real RIDs (stale and reused-slot handles fail loudly, proven by test). Tick reports the post-tick counter through an out-param — the minimal read-back seam that makes the Rust-side counter testable rather than write-only. Panic policy decided and implemented: a panic caught inside an engine's scope poisons that one engine — every later call on it returns the new `FfiCode.EnginePoisoned` (4) except destroy, which must keep working for teardown ordering; the poison is per-engine, and the containment runs inside the registry lock scope so a panic can never poison the Rust mutex itself. `buck_engine_test_panic` is the permanent probe.
 - Layout-assertion seam (M4): `EngineConfig` is the first hand-mirrored `#[repr(C)]` struct, and `buck_layout_engine_config` exports its size and field offsets for the C# test that compares against `Marshal.SizeOf`/`OffsetOf` on every target — the interim protection until FFI binding generation exists.
 - docs/wasm-toolchain.md glossary: the incremental-build gap where a new pinvoke signature *shape* regenerates the m2n trampoline table without rerunning the native relink (mono aborts at the first call; fix is deleting the host's `obj/**/wasm/for-*` dirs), hit live at M4 with the first `double` parameter.
@@ -42,5 +43,7 @@ All notable changes to this project will be documented in this file.
 - `dotnet publish -c Release` of the browser host no longer fails in wasm-opt: the Release link is pinned to `-O1` (skipping the binaryen pass that rejects rustc's newer target_features). The publish output is verified static-servable (`python3 -m http.server`); deployment shape documented in docs/wasm-toolchain.md.
 
 ### Breaking
+
+- `EngineStub` and its tests are deleted (M4): the real `Engine` replaces the M0 wiring stub.
 
 - `NativeMethods.buck_callback_invoke` takes the callback as `IntPtr` instead of `delegate* unmanaged<ulong, int, int*, int>` (ABI-identical; call sites cast). Mono's wasm interp-to-native path aborts on function-pointer parameter types in pinvoke signatures, so this is now a standing binding convention: callbacks cross the FFI as `IntPtr`.
