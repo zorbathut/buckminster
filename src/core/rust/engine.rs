@@ -6,12 +6,13 @@ use std::sync::Mutex;
 use crate::ffi::{FfiCode, FfiError, guard, panic_message};
 use crate::rid::{Rid, RidAllocator, RidError};
 
-/// The first hand-mirrored `#[repr(C)]` struct -- keep in sync with EngineConfig in src/stdcs/cs/EngineConfig.cs; buck_layout_engine_config is the assertion seam that catches drift. Both fields feed logging::configure at create (last-wins across engines; logging is process-scoped).
+/// The first hand-mirrored `#[repr(C)]` struct -- keep in sync with EngineConfig in src/stdcs/cs/EngineConfig.cs; buck_layout_engine_config is the assertion seam that catches drift. The fields feed logging::configure at create (last-wins across engines; logging is process-scoped).
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct EngineConfig {
     pub log_level_max: i32,
     pub log_buffer_capacity: u32,
+    pub log_stderr_level_max: i32,
 }
 
 pub struct Engine {
@@ -34,7 +35,7 @@ fn invalid_handle_error(handle: u64, why: RidError) -> FfiError {
 
 // Every engine-scoped export goes through here. The inner catch_unwind runs INSIDE the lock scope: a panic in the body never unwinds through the MutexGuard (which would poison the std mutex and brick every later ENGINES.lock() in the process, destroy included); instead it marks this one engine poisoned and reports Panic through the normal rails.
 //
-// The body runs while the ENGINES lock is held: it must not invoke callbacks into C# (callback rule 4) and must not re-enter any buck_engine_* export (the mutex is not reentrant -- that's a deadlock). Work that needs either happens before the lock or after release, like the log drain does.
+// The body runs while the ENGINES lock is held: it must not invoke callbacks into C# (callback rule 4) and must not re-enter ANY buck_* export -- not just engine-scoped ones, because every export's exit-drain is a potential log-sink invocation, and invoking the sink under this lock is the rule-4 deadlock (and the mutex is not reentrant besides). This is the load-bearing constraint for M5 window callbacks and module hooks: work that calls out happens before the lock or after release.
 //
 // The lock() expect can only fire if a panic escaped this containment. It then unwinds into guard's outer catch_unwind, so every subsequent engine call returns Panic with this message (plus per-call stderr backtraces) -- degraded but loud, and it can't deadlock or alias state.
 fn with_engine<R>(
@@ -82,7 +83,11 @@ pub unsafe extern "C" fn buck_engine_create(
     guard(|| {
         let config = unsafe { *config };
         // Config validation (including the capacity >= 1 rule) lives in logging::configure, the module that owns the constraint.
-        crate::logging::configure(config.log_level_max, config.log_buffer_capacity)?;
+        crate::logging::configure(
+            config.log_level_max,
+            config.log_stderr_level_max,
+            config.log_buffer_capacity,
+        )?;
         let engine = Engine {
             tick_count: 0,
             poisoned: false,
@@ -140,6 +145,18 @@ pub extern "C" fn buck_engine_test_panic(engine: u64) -> i32 {
     })
 }
 
+/// Permanent test-only export: logs two records then panics, proving the records-before-result guarantee against the shipped artifact -- the exit-drain must deliver both, in order, before the Panic code returns, and the engine must be poisoned afterward.
+#[unsafe(no_mangle)]
+pub extern "C" fn buck_engine_test_log_then_panic(engine: u64) -> i32 {
+    guard(|| {
+        with_engine(engine, |_engine| {
+            log::error!("first record before the panic");
+            log::error!("second record before the panic");
+            panic!("deliberate panic after logging")
+        })
+    })
+}
+
 /// The layout-assertion seam for EngineConfig (one export per mirrored struct, one out-param per field): C# compares against Marshal.SizeOf/OffsetOf, the interim protection until FFI binding generation exists.
 ///
 /// # Safety
@@ -149,6 +166,7 @@ pub unsafe extern "C" fn buck_layout_engine_config(
     out_size: *mut u64,
     out_offset_log_level_max: *mut u64,
     out_offset_log_buffer_capacity: *mut u64,
+    out_offset_log_stderr_level_max: *mut u64,
 ) -> i32 {
     guard(|| {
         unsafe {
@@ -156,6 +174,8 @@ pub unsafe extern "C" fn buck_layout_engine_config(
             *out_offset_log_level_max = std::mem::offset_of!(EngineConfig, log_level_max) as u64;
             *out_offset_log_buffer_capacity =
                 std::mem::offset_of!(EngineConfig, log_buffer_capacity) as u64;
+            *out_offset_log_stderr_level_max =
+                std::mem::offset_of!(EngineConfig, log_stderr_level_max) as u64;
         }
         Ok(())
     })

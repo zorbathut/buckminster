@@ -31,22 +31,28 @@ internal static partial class NativeMethods
     internal static partial FfiCode buck_engine_test_panic(ulong engine);
 
     [LibraryImport(Library)]
-    internal static partial FfiCode buck_layout_engine_config(out ulong size, out ulong offsetLogLevelMax, out ulong offsetLogBufferCapacity);
-
-    // The sink crosses as IntPtr (the standing wasm binding constraint); call sites cast through delegate* unmanaged<ulong, int, byte*, nuint, int>.
-    [LibraryImport(Library)]
-    internal static partial FfiCode buck_logs_drain(IntPtr sink, ulong userdata);
+    internal static partial FfiCode buck_engine_test_log_then_panic(ulong engine);
 
     [LibraryImport(Library)]
-    private static unsafe partial FfiCode buck_test_log(int level, byte* message, nuint length);
+    internal static partial FfiCode buck_layout_engine_config(out ulong size, out ulong offsetLogLevelMax, out ulong offsetLogBufferCapacity, out ulong offsetLogStderrLevelMax);
 
-    // Friendly wrapper over the span-pair convention (native strings cross as pointer + length, never marshalled).
-    internal static unsafe FfiCode TestLog(int level, string message)
+    // The log sink crosses as IntPtr (the standing wasm binding constraint); call sites cast through delegate* unmanaged<ulong, int, byte*, nuint, int>.
+    [LibraryImport(Library)]
+    internal static partial FfiCode buck_log_sink_set(IntPtr logSink, ulong userdata);
+
+    [LibraryImport(Library)]
+    internal static partial FfiCode buck_log_sink_clear();
+
+    [LibraryImport(Library)]
+    private static unsafe partial FfiCode buck_log(int level, byte* message, nuint length);
+
+    // Friendly wrapper over the span-pair convention (native strings cross as pointer + length, never marshalled). The Log facade's other half.
+    internal static unsafe FfiCode EmitLog(int level, string message)
     {
         byte[] bytes = System.Text.Encoding.UTF8.GetBytes(message);
         fixed (byte* pointer = bytes)
         {
-            return buck_test_log(level, pointer, (nuint)bytes.Length);
+            return buck_log(level, pointer, (nuint)bytes.Length);
         }
     }
 

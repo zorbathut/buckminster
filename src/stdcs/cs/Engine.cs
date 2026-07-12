@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using Buckminster.Ffi;
@@ -15,7 +14,7 @@ public sealed class Engine : IDisposable
     // The init lifecycle latches: started closes registration (including from inside a module's own Initialize), failed wedges the engine loudly -- re-pumping after a failed init would silently re-run the Initializes that succeeded before the failure.
     private bool initStarted;
     private bool initFailed;
-    private readonly ulong sinkKey;
+    private readonly ulong logSinkKey;
     private readonly List<IModule> modules = new List<IModule>();
     private readonly HashSet<Type> moduleTypes = new HashSet<Type>();
 
@@ -24,18 +23,31 @@ public sealed class Engine : IDisposable
     // Completed ticks. Increments only after the modules and the native tick have all run, so a thrown module Tick can't desync this from the Rust-side counter.
     public ulong TickCount { get; private set; }
 
-    private Engine(ulong handle, ulong sinkKey)
+    private Engine(ulong handle, ulong logSinkKey)
     {
         this.handle = handle;
-        this.sinkKey = sinkKey;
+        this.logSinkKey = logSinkKey;
     }
 
-    // The sink is mandatory: silent log dropping is banned and there is no principled "absent" value -- a host that truly wants to discard logs writes that decision down as a discarding delegate.
-    public static Engine Create(EngineConfig config, Action<LogLevel, string> logSink)
+    // The log sink is mandatory: silent log dropping is banned and there is no principled "absent" value -- a host that truly wants to discard logs writes that decision down as a discarding delegate. Registration is process-global last-wins (logging is process-scoped; multi-engine separation is a non-goal -- which also covers the known sharp edge that a DIFFERENT live engine's sink throwing during this create's exit-drain surfaces here as CallbackError and strands the new Rust-side handle, since the out-param is unspecified on nonzero returns and cannot be destroyed).
+    public static unsafe Engine Create(EngineConfig config, Action<LogLevel, string> logSink)
     {
-        ThrowOnError(NativeMethods.buck_engine_create(config, out ulong handle));
-        ulong sinkKey = CallbackTable.Register(logSink);
-        return new Engine(handle, sinkKey);
+        FfiCall.ThrowOnError(NativeMethods.buck_engine_create(config, out ulong handle), "engine create");
+        ulong logSinkKey = CallbackTable.Register(logSink);
+        try
+        {
+            // buck_log_sink_set's own exit is the first delivery point, and the buffer may hold residue (a previous engine's pushback tail); if the new sink throws on it, the just-created handle and key must not leak.
+            FfiCall.ThrowOnError(NativeMethods.buck_log_sink_set((IntPtr)(delegate* unmanaged<ulong, int, byte*, nuint, int>)&LogSinkThunk, logSinkKey), "log sink registration");
+        }
+        catch
+        {
+            // Cleanup ORDER is load-bearing: clear the Rust registration FIRST (its own exit-drain copies None and delivers nothing), so the unregister and destroy below can never fire the now-dead key -- reversing this leaves a dangling registration whose dead key breaks every subsequent create in the process. The two return codes are deliberately unchecked: with the registration already cleared they can only fail via states that would themselves have thrown above, and the sink's original exception must win.
+            NativeMethods.buck_log_sink_clear();
+            CallbackTable.Unregister(logSinkKey);
+            NativeMethods.buck_engine_destroy(handle);
+            throw;
+        }
+        return new Engine(handle, logSinkKey);
     }
 
     // Registration is open until init starts (the first PumpEvents); dependencies are declared by concrete type, so a second instance of the same type would make every dependency on it ambiguous.
@@ -74,7 +86,6 @@ public sealed class Engine : IDisposable
             }
             IsReady = true;
         }
-        DrainLogs();
     }
 
     public void Tick(double dt)
@@ -89,7 +100,7 @@ public sealed class Engine : IDisposable
         {
             module.Tick(this, dt);
         }
-        ThrowOnError(NativeMethods.buck_engine_tick(handle, dt, out _));
+        FfiCall.ThrowOnError(NativeMethods.buck_engine_tick(handle, dt, out _), "engine tick");
         TickCount += 1;
     }
 
@@ -107,14 +118,14 @@ public sealed class Engine : IDisposable
         disposed = true;
         try
         {
-            // Final drain: records logged since the last pump must not vanish. (Records logged BY destroy itself are undeliverable -- the sink is gone after this; that residue is accepted and documented.) Destroy still runs if the sink throws here: teardown must not be hostage to a broken sink.
-            DrainLogs();
+            // Destroy FIRST: its own exit-drain delivers the buffered tail -- including records logged by destroy itself -- through the still-registered log sink. A throwing sink surfaces from here, but teardown is not hostage to it: the finally clears the registration either way.
+            FfiCall.ThrowOnError(NativeMethods.buck_engine_destroy(handle), "engine destroy");
         }
         finally
         {
-            CallbackTable.Unregister(sinkKey);
-            ThrowOnError(NativeMethods.buck_engine_destroy(handle));
             handle = 0;
+            FfiCall.ThrowOnError(NativeMethods.buck_log_sink_clear(), "log sink clear");
+            CallbackTable.Unregister(logSinkKey);
         }
     }
 
@@ -209,8 +220,8 @@ public sealed class Engine : IDisposable
     {
         try
         {
-            Action<LogLevel, string> sink = (Action<LogLevel, string>)CallbackTable.Get(userdata);
-            sink((LogLevel)level, Encoding.UTF8.GetString(message, checked((int)length)));
+            Action<LogLevel, string> logSink = (Action<LogLevel, string>)CallbackTable.Get(userdata);
+            logSink((LogLevel)level, Encoding.UTF8.GetString(message, checked((int)length)));
             return 0;
         }
         catch (Exception exception)
@@ -220,36 +231,8 @@ public sealed class Engine : IDisposable
         }
     }
 
-    private unsafe void DrainLogs()
-    {
-        FfiCode code = NativeMethods.buck_logs_drain((IntPtr)(delegate* unmanaged<ulong, int, byte*, nuint, int>)&LogSinkThunk, sinkKey);
-        if (code == FfiCode.Ok)
-        {
-            return;
-        }
-        if (code == FfiCode.CallbackError)
-        {
-            Exception? stashed = CallbackExceptionStash.Take();
-            if (stashed != null)
-            {
-                ExceptionDispatchInfo.Capture(stashed).Throw();
-            }
-        }
-        throw new InvalidOperationException($"log drain failed with {code}: {NativeMethods.LastErrorMessage() ?? "(no error message recorded)"}");
-    }
-
     private void ThrowIfDisposed()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-    }
-
-    private static void ThrowOnError(FfiCode code)
-    {
-        if (code == FfiCode.Ok)
-        {
-            return;
-        }
-        string message = NativeMethods.LastErrorMessage() ?? "(no error message recorded)";
-        throw new InvalidOperationException($"engine call failed with {code}: {message}");
     }
 }

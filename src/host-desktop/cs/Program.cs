@@ -8,7 +8,7 @@ internal static class Program
 {
     private static void Main()
     {
-        using Engine engine = Engine.Create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 1024 }, (level, message) => Console.WriteLine($"[{level}] {message}"));
+        using Engine engine = Engine.Create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 1024, LogStderrLevelMax = (int)LogLevel.Warn }, (level, message) => Console.WriteLine($"[{level}] {message}"));
         while (!engine.IsReady)
         {
             engine.PumpEvents();

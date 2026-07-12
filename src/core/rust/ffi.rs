@@ -49,18 +49,34 @@ fn clear_error() {
     });
 }
 
-/// Runs an export body with the standard rails: `catch_unwind` so no panic crosses the FFI, error-to-code mapping, and last-error storage. Success clears the stored error, so a null from `buck_last_error_message` always means "last call on this thread succeeded".
+/// Runs an export body with the standard rails: `catch_unwind` so no panic crosses the FFI, the exit-drain (buffered log records deliver at the tail of EVERY export, records-before-result -- see logging::drain_at_exit), error-to-code mapping, and last-error storage. Success clears the stored error, so a null from `buck_last_error_message` always means "last call on this thread succeeded".
 ///
-/// LAST_ERROR is only ever borrowed inside store_error/clear_error, never across `body()` -- a callback reentering `buck_*` on this thread nests `guard`, and a borrow held across the body would panic here and masquerade as a caller panic (PLAN.md callback rule 4, applied to the wrapper itself).
+/// Sequencing is load-bearing: body, then drain, then LAST_ERROR as the FINAL act. The log sink is C# code whose nested `buck_*` calls clobber this thread's LAST_ERROR -- storing the body's error before draining would let a sink's successful nested call clear it, breaking "null means success" exactly on the failed-call-with-diagnostics case.
+///
+/// LAST_ERROR is only ever borrowed inside store_error/clear_error, never across `body()` or the drain -- a callback reentering `buck_*` on this thread nests `guard` (PLAN.md callback rule 4, applied to the wrapper itself).
 pub fn guard(body: impl FnOnce() -> Result<(), FfiError>) -> i32 {
     // The default panic hook stays installed: a contained panic still prints its backtrace to stderr, which is loud and intended.
     //
-    // AssertUnwindSafe is justified because the only state this module observes after a caught panic is LAST_ERROR, which is immediately overwritten. The rail's contract for callers: Panic means the state the body was mutating is suspect. For engine-scoped exports that suspicion is enforced -- engine.rs catches the panic inside the ENGINES lock scope, marks the engine poisoned (every later op but destroy returns EnginePoisoned), and re-reports it through this rail as an FfiError; a panic reaching the catch_unwind below is one from outside any engine scope.
-    match catch_unwind(AssertUnwindSafe(body)) {
-        Ok(Ok(())) => {
-            clear_error();
-            FfiCode::Ok as i32
-        }
+    // AssertUnwindSafe is justified because the only state this module observes after a caught panic is LAST_ERROR, which is written after everything else. The rail's contract for callers: Panic means the state the body was mutating is suspect. For engine-scoped exports that suspicion is enforced -- engine.rs catches the panic inside the ENGINES lock scope, marks the engine poisoned (every later op but destroy returns EnginePoisoned), and re-reports it through this rail as an FfiError; a panic reaching the catch_unwind below is one from outside any engine scope.
+    let body_outcome = catch_unwind(AssertUnwindSafe(body));
+    // The drain runs unconditionally (a routine error return or a contained panic deserves its diagnostics more, not less) and under its own catch_unwind: it executes outside the body's containment, and an unwind from here would cross the extern "C" boundary and abort the process.
+    let drain_outcome = catch_unwind(AssertUnwindSafe(crate::logging::drain_at_exit));
+    // Precedence: the body's outcome always wins the return code. A drain failure surfaces as this call's result only when the body succeeded; when both fail, the body's code and message return and the sink's exception is still in the C# stash (FfiCall takes it unconditionally and attaches it -- true for the standard thunk, which always stashes before returning nonzero; a hypothetical non-stashing registrant would lose its drain error here), while a drain PANIC alongside a body failure is reported only by the panic hook's stderr backtrace -- accepted, the body's error must not be masked.
+    match body_outcome {
+        Ok(Ok(())) => match drain_outcome {
+            Ok(Ok(())) => {
+                clear_error();
+                FfiCode::Ok as i32
+            }
+            Ok(Err(error)) => {
+                store_error(error.message);
+                error.code as i32
+            }
+            Err(payload) => {
+                store_error(panic_message(&payload));
+                FfiCode::Panic as i32
+            }
+        },
         Ok(Err(error)) => {
             // An FfiError carrying Ok would report success to the caller while storing an error message, silently breaking "null means the last call succeeded".
             debug_assert!(

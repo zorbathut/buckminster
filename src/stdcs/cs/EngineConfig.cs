@@ -8,4 +8,6 @@ public struct EngineConfig
 {
     public int LogLevelMax;
     public uint LogBufferCapacity;
+    // Threshold for the immediate stderr echo (0 = off .. 5 = trace), independent of LogLevelMax: records clearing this go to stderr at emit time, before buffering -- the zero-latency, crash-proof diagnostics channel.
+    public int LogStderrLevelMax;
 }

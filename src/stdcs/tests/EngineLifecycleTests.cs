@@ -11,7 +11,7 @@ public class EngineLifecycleTests
 {
     private static EngineConfig DefaultConfig()
     {
-        return new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 1024 };
+        return new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 1024, LogStderrLevelMax = 0 };
     }
 
     [Test]
@@ -108,9 +108,10 @@ public class EngineLifecycleTests
     public void EngineConfigLayoutMatchesRust()
     {
         // The layout-assertion seam (PLAN.md M4 item 2): the C# mirror and the Rust #[repr(C)] struct must agree on size and every field offset, on every target. This is the interim protection until FFI binding generation exists, and the generator's output check afterward.
-        Assert.That(NativeMethods.buck_layout_engine_config(out ulong size, out ulong offsetLogLevelMax, out ulong offsetLogBufferCapacity), Is.EqualTo(FfiCode.Ok));
+        Assert.That(NativeMethods.buck_layout_engine_config(out ulong size, out ulong offsetLogLevelMax, out ulong offsetLogBufferCapacity, out ulong offsetLogStderrLevelMax), Is.EqualTo(FfiCode.Ok));
         Assert.That((ulong)Marshal.SizeOf<EngineConfig>(), Is.EqualTo(size));
         Assert.That((ulong)(long)Marshal.OffsetOf<EngineConfig>(nameof(EngineConfig.LogLevelMax)), Is.EqualTo(offsetLogLevelMax));
         Assert.That((ulong)(long)Marshal.OffsetOf<EngineConfig>(nameof(EngineConfig.LogBufferCapacity)), Is.EqualTo(offsetLogBufferCapacity));
+        Assert.That((ulong)(long)Marshal.OffsetOf<EngineConfig>(nameof(EngineConfig.LogStderrLevelMax)), Is.EqualTo(offsetLogStderrLevelMax));
     }
 }
