@@ -7,4 +7,5 @@ internal enum FfiCode
     Panic = 1,
     CallbackError = 2,
     InvalidArgument = 3,
+    EnginePoisoned = 4,
 }

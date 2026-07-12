@@ -19,6 +19,21 @@ internal static partial class NativeMethods
     internal static partial FfiCode buck_test_panic();
 
     [LibraryImport(Library)]
+    internal static partial FfiCode buck_engine_create(in EngineConfig config, out ulong engine);
+
+    [LibraryImport(Library)]
+    internal static partial FfiCode buck_engine_destroy(ulong engine);
+
+    [LibraryImport(Library)]
+    internal static partial FfiCode buck_engine_tick(ulong engine, double dt, out ulong tickCount);
+
+    [LibraryImport(Library)]
+    internal static partial FfiCode buck_engine_test_panic(ulong engine);
+
+    [LibraryImport(Library)]
+    internal static partial FfiCode buck_layout_engine_config(out ulong size, out ulong offsetLogLevelMax, out ulong offsetLogBufferCapacity);
+
+    [LibraryImport(Library)]
     private static partial IntPtr buck_last_error_message();
 
     // Null when the last buck_* call on this thread succeeded. The native pointer is only valid until the next buck_* call on this thread (reading via buck_last_error_message itself is non-destructive), so copy to a managed string immediately.

@@ -86,7 +86,8 @@ pub struct RidAllocator<T> {
 }
 
 impl<T> RidAllocator<T> {
-    pub fn new(tag: u8) -> RidAllocator<T> {
+    // const so a registry can live in a static (`static ENGINES: Mutex<RidAllocator<Engine>>` needs const construction).
+    pub const fn new(tag: u8) -> RidAllocator<T> {
         RidAllocator {
             tag,
             slots: Vec::new(),

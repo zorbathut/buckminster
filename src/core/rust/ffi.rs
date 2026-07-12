@@ -12,6 +12,7 @@ pub enum FfiCode {
     Panic = 1,
     CallbackError = 2,
     InvalidArgument = 3,
+    EnginePoisoned = 4,
 }
 
 pub struct FfiError {
@@ -54,7 +55,7 @@ fn clear_error() {
 pub fn guard(body: impl FnOnce() -> Result<(), FfiError>) -> i32 {
     // The default panic hook stays installed: a contained panic still prints its backtrace to stderr, which is loud and intended.
     //
-    // AssertUnwindSafe is justified because the only state this module observes after a caught panic is LAST_ERROR, which is immediately overwritten. The rail's contract for callers is weaker: Panic means engine state is suspect (a panic mid-mutation leaves whatever it was mutating torn) -- fine while no engine state exists; M4+ decides whether Panic escalates to poisoning the engine.
+    // AssertUnwindSafe is justified because the only state this module observes after a caught panic is LAST_ERROR, which is immediately overwritten. The rail's contract for callers: Panic means the state the body was mutating is suspect. For engine-scoped exports that suspicion is enforced -- engine.rs catches the panic inside the ENGINES lock scope, marks the engine poisoned (every later op but destroy returns EnginePoisoned), and re-reports it through this rail as an FfiError; a panic reaching the catch_unwind below is one from outside any engine scope.
     match catch_unwind(AssertUnwindSafe(body)) {
         Ok(Ok(())) => {
             clear_error();
@@ -70,16 +71,20 @@ pub fn guard(body: impl FnOnce() -> Result<(), FfiError>) -> i32 {
             error.code as i32
         }
         Err(payload) => {
-            let message = if let Some(text) = payload.downcast_ref::<&str>() {
-                (*text).to_string()
-            } else if let Some(text) = payload.downcast_ref::<String>() {
-                text.clone()
-            } else {
-                "panic payload of unknown type".to_string()
-            };
-            store_error(message);
+            store_error(panic_message(&payload));
             FfiCode::Panic as i32
         }
+    }
+}
+
+/// The human-readable text of a caught panic payload. Shared by `guard` and the engine-scoped inner catch (engine.rs), which converts a panic into a poison + Panic-coded FfiError instead of letting it unwind through the ENGINES MutexGuard.
+pub fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(text) = payload.downcast_ref::<&str>() {
+        (*text).to_string()
+    } else if let Some(text) = payload.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "panic payload of unknown type".to_string()
     }
 }
 
