@@ -33,6 +33,23 @@ internal static partial class NativeMethods
     [LibraryImport(Library)]
     internal static partial FfiCode buck_layout_engine_config(out ulong size, out ulong offsetLogLevelMax, out ulong offsetLogBufferCapacity);
 
+    // The sink crosses as IntPtr (the standing wasm binding constraint); call sites cast through delegate* unmanaged<ulong, int, byte*, nuint, int>.
+    [LibraryImport(Library)]
+    internal static partial FfiCode buck_logs_drain(IntPtr sink, ulong userdata);
+
+    [LibraryImport(Library)]
+    private static unsafe partial FfiCode buck_test_log(int level, byte* message, nuint length);
+
+    // Friendly wrapper over the span-pair convention (native strings cross as pointer + length, never marshalled).
+    internal static unsafe FfiCode TestLog(int level, string message)
+    {
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(message);
+        fixed (byte* pointer = bytes)
+        {
+            return buck_test_log(level, pointer, (nuint)bytes.Length);
+        }
+    }
+
     [LibraryImport(Library)]
     private static partial IntPtr buck_last_error_message();
 

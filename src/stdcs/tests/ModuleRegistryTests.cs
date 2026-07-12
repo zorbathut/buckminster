@@ -10,7 +10,8 @@ public class ModuleRegistryTests
 {
     private static Engine CreateEngine()
     {
-        return Engine.Create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 1024 });
+        // These tests don't observe logs; discarding is a written-down decision here, not a default.
+        return Engine.Create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 1024 }, (level, message) => { });
     }
 
     // Test modules record their lifecycle into a shared journal so ordering is asserted on evidence, not inference.

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using Buckminster.Ffi;
 
@@ -13,6 +15,7 @@ public sealed class Engine : IDisposable
     // The init lifecycle latches: started closes registration (including from inside a module's own Initialize), failed wedges the engine loudly -- re-pumping after a failed init would silently re-run the Initializes that succeeded before the failure.
     private bool initStarted;
     private bool initFailed;
+    private readonly ulong sinkKey;
     private readonly List<IModule> modules = new List<IModule>();
     private readonly HashSet<Type> moduleTypes = new HashSet<Type>();
 
@@ -21,15 +24,18 @@ public sealed class Engine : IDisposable
     // Completed ticks. Increments only after the modules and the native tick have all run, so a thrown module Tick can't desync this from the Rust-side counter.
     public ulong TickCount { get; private set; }
 
-    private Engine(ulong handle)
+    private Engine(ulong handle, ulong sinkKey)
     {
         this.handle = handle;
+        this.sinkKey = sinkKey;
     }
 
-    public static Engine Create(EngineConfig config)
+    // The sink is mandatory: silent log dropping is banned and there is no principled "absent" value -- a host that truly wants to discard logs writes that decision down as a discarding delegate.
+    public static Engine Create(EngineConfig config, Action<LogLevel, string> logSink)
     {
         ThrowOnError(NativeMethods.buck_engine_create(config, out ulong handle));
-        return new Engine(handle);
+        ulong sinkKey = CallbackTable.Register(logSink);
+        return new Engine(handle, sinkKey);
     }
 
     // Registration is open until init starts (the first PumpEvents); dependencies are declared by concrete type, so a second instance of the same type would make every dependency on it ambiguous.
@@ -68,6 +74,7 @@ public sealed class Engine : IDisposable
             }
             IsReady = true;
         }
+        DrainLogs();
     }
 
     public void Tick(double dt)
@@ -98,8 +105,17 @@ public sealed class Engine : IDisposable
             return;
         }
         disposed = true;
-        ThrowOnError(NativeMethods.buck_engine_destroy(handle));
-        handle = 0;
+        try
+        {
+            // Final drain: records logged since the last pump must not vanish. (Records logged BY destroy itself are undeliverable -- the sink is gone after this; that residue is accepted and documented.) Destroy still runs if the sink throws here: teardown must not be hostage to a broken sink.
+            DrainLogs();
+        }
+        finally
+        {
+            CallbackTable.Unregister(sinkKey);
+            ThrowOnError(NativeMethods.buck_engine_destroy(handle));
+            handle = 0;
+        }
     }
 
     // Init in stable topological order: repeatedly take the first registered module whose dependencies are all initialized, so ordering is fully determined by declarations + registration order (deterministic, per the Determinism rules).
@@ -185,6 +201,41 @@ public sealed class Engine : IDisposable
             cycle.Append(path[i].Name);
         }
         return cycle.ToString();
+    }
+
+    // The standard callback thunk shape (static, [UnmanagedCallersOnly], u64 key, exception stashed and reported as a nonzero return -- never thrown across the FFI).
+    [UnmanagedCallersOnly]
+    private static unsafe int LogSinkThunk(ulong userdata, int level, byte* message, nuint length)
+    {
+        try
+        {
+            Action<LogLevel, string> sink = (Action<LogLevel, string>)CallbackTable.Get(userdata);
+            sink((LogLevel)level, Encoding.UTF8.GetString(message, checked((int)length)));
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            CallbackExceptionStash.Stash(exception);
+            return 1;
+        }
+    }
+
+    private unsafe void DrainLogs()
+    {
+        FfiCode code = NativeMethods.buck_logs_drain((IntPtr)(delegate* unmanaged<ulong, int, byte*, nuint, int>)&LogSinkThunk, sinkKey);
+        if (code == FfiCode.Ok)
+        {
+            return;
+        }
+        if (code == FfiCode.CallbackError)
+        {
+            Exception? stashed = CallbackExceptionStash.Take();
+            if (stashed != null)
+            {
+                ExceptionDispatchInfo.Capture(stashed).Throw();
+            }
+        }
+        throw new InvalidOperationException($"log drain failed with {code}: {NativeMethods.LastErrorMessage() ?? "(no error message recorded)"}");
     }
 
     private void ThrowIfDisposed()

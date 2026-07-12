@@ -9,3 +9,7 @@ license = "MIT"
 path = "rust/lib.rs"
 # cdylib is what C# loads natively; rlib is for integration tests and future dependent crates (in-crate unit tests work without it). The emscripten staticlib is deliberately NOT listed: it's produced per-invocation via `cargo rustc --crate-type staticlib` (build-rust-wasm), because listing it here would make wasm builds also attempt the cdylib link, which needs emcc at cargo time -- an archive needs no linker at all.
 crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The logging facade (PLAN.md M4 item 4): records buffer behind it in logging.rs and drain to the C# sink. First and so far only external dependency of the core crate.
+log = "0.4"

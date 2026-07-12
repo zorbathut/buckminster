@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use crate::ffi::{FfiCode, FfiError, guard, panic_message};
 use crate::rid::{Rid, RidAllocator, RidError};
 
-/// The first hand-mirrored `#[repr(C)]` struct -- keep in sync with EngineConfig in src/stdcs/cs/EngineConfig.cs; buck_layout_engine_config is the assertion seam that catches drift. Fields are consumed by the logging pipeline (M4 chunk 4): the level filter and the bound on the Rust-side record buffer.
+/// The first hand-mirrored `#[repr(C)]` struct -- keep in sync with EngineConfig in src/stdcs/cs/EngineConfig.cs; buck_layout_engine_config is the assertion seam that catches drift. Both fields feed logging::configure at create (last-wins across engines; logging is process-scoped).
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct EngineConfig {
@@ -15,9 +15,6 @@ pub struct EngineConfig {
 }
 
 pub struct Engine {
-    // expect(dead_code) rather than allow: the logging chunk of M4 starts reading this, at which point the expectation errors and gets deleted.
-    #[expect(dead_code)]
-    pub config: EngineConfig,
     pub tick_count: u64,
     // Set when a panic was caught inside this engine's scope: the state is suspect, so every subsequent op returns EnginePoisoned -- except destroy, which must keep working (explicit engine destroy is the teardown-ordering guarantee the callback lifetime story leans on).
     pub poisoned: bool,
@@ -84,14 +81,9 @@ pub unsafe extern "C" fn buck_engine_create(
 ) -> i32 {
     guard(|| {
         let config = unsafe { *config };
-        if config.log_buffer_capacity == 0 {
-            return Err(FfiError::new(
-                FfiCode::InvalidArgument,
-                "log_buffer_capacity must be at least 1 (a zero-capacity buffer would drop every record)",
-            ));
-        }
+        // Config validation (including the capacity >= 1 rule) lives in logging::configure, the module that owns the constraint.
+        crate::logging::configure(config.log_level_max, config.log_buffer_capacity)?;
         let engine = Engine {
-            config,
             tick_count: 0,
             poisoned: false,
         };
