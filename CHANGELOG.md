@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- RID allocator (`src/core/rust/rid.rs`, M4): the generational slotmap behind every future Rust-side object handle — u64 RIDs (32-bit slot index, 8-bit allocator type tag, 24-bit generation; raw 0 reserved as null), `Option` lookups with loud errors on stale/mis-tagged frees, LIFO free list (deterministic reuse order, pinned by test), generation-exhausted slots retired rather than ever aliasing, and a shutdown leak report (dropping an allocator with live entries prints their raw IDs to stderr; richer attribution later). Ported from Godot's `rid_owner.h` with deliberate deviations (per-slot generations instead of the process-global counter; type tag actually in the RID; no lock-free chunking). One shared implementation, instantiated per subsystem.
+
 - Single tool entry point: `./tool.bat <command>` (polyglot sh+batch, runs everywhere), with a self-healing poetry-managed tools venv and a `tools/<command>.py` command registry. Commands: `build`, `test`, `check`.
 - Toolchain audit/auto-provisioning (`tools/lib/toolchains.py`): rustup and the .NET SDK are installed user-local when missing (Windows paths untested until the M5 CI build check); C compiler / MSVC Build Tools are audited with install instructions. Pins: `rust-toolchain.toml`, `global.json`, `tools/poetry.lock`.
 - SCons build orchestration with pyright strict mode enforced on the build code (`./tool.bat check`); the SCons API is confined behind the typed facade `tools/lib/sconsfacade.py` (checked at basic mode, the quarantine for SCons type suppressions), with the logic-free `SConstruct` shim unchecked.

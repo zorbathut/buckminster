@@ -1,6 +1,7 @@
 //! buckminster-core: kernel primitives under a flat C FFI. M1 exports are the walking skeleton proving the FFI discipline; real engine surface arrives from M4 on.
 
 mod ffi;
+pub mod rid;
 
 use ffi::{FfiCode, FfiError, guard};
 
