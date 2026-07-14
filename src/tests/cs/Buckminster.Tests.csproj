@@ -14,7 +14,8 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="../cs/Buckminster.csproj" />
+        <ProjectReference Include="../../core/cs/Buckminster.Core.csproj" />
+        <ProjectReference Include="../../general/cs/Buckminster.General.csproj" />
     </ItemGroup>
 
 </Project>

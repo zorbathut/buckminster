@@ -8,7 +8,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- Raw FFI stays internal, never public API; tests and the walking-skeleton hosts reach it through these. The host entries die with FfiSmoke at M3. -->
+        <!-- Raw FFI stays internal, never public API; tests reach it through these. The wasm host entries exist because the test sources are glob-compiled INTO those host assemblies, so internals-touching fixtures run under the hosts' identities. -->
         <InternalsVisibleTo Include="Buckminster.Tests" />
         <InternalsVisibleTo Include="Buckminster.Host.Web" />
         <InternalsVisibleTo Include="Buckminster.Host.WasmNode" />

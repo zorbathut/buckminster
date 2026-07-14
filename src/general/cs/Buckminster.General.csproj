@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- Commonly-used managed code that isn't strictly part of the minimum core (RngStream, and whatever earns its way in later). May reference Core (none needed yet), but never does its own FFI; anything above core may reference it, modules and usergames included. TFM/nullable/warnings come from src/Directory.Build.props. -->
+
+</Project>

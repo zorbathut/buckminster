@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::ffi::{CString, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-// Error codes returned by every fallible buck_* export. Hand-mirrored on the C# side -- keep in sync with FfiCode in src/stdcs/cs/Ffi/FfiCode.cs. Future codes append; no generic catch-all.
+// Error codes returned by every fallible buck_* export. Hand-mirrored on the C# side -- keep in sync with FfiCode in src/core/cs/Ffi/FfiCode.cs. Future codes append; no generic catch-all.
 #[repr(i32)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FfiCode {

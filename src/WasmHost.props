@@ -17,7 +17,7 @@
         <!-- The in-host test suite (RunnerWasm) reaches fixtures only via reflection; trimming one away would silently shrink the suite. -->
         <TrimmerRootAssembly Include="$(AssemblyName)" />
     </ItemGroup>
-    <!-- Same loud-failure pattern as BuckCheckNativeLibrary in Buckminster.csproj, for the wasm staticlib. -->
+    <!-- Same loud-failure pattern as BuckCheckNativeLibrary in Buckminster.Core.csproj, for the wasm staticlib. -->
     <Target Name="BuckCheckWasmStaticLib" BeforeTargets="AssignTargetPaths" Condition="'$(DesignTimeBuild)' != 'true'">
         <Error Condition="!Exists('$(BuckWasmStaticLib)')" Text="Wasm native library not found at $(BuckWasmStaticLib) -- run './tool.bat build' (or 'cargo rustc -p buckminster-core --target wasm32-unknown-emscripten --crate-type staticlib' with cwd src/) before building the wasm hosts." />
     </Target>

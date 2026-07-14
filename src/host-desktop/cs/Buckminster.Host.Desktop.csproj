@@ -5,7 +5,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="../../stdcs/cs/Buckminster.csproj" />
+        <ProjectReference Include="../../core/cs/Buckminster.Core.csproj" />
     </ItemGroup>
 
 </Project>

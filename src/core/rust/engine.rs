@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use crate::ffi::{FfiCode, FfiError, guard, panic_message};
 use crate::rid::{Rid, RidAllocator, RidError};
 
-/// The first hand-mirrored `#[repr(C)]` struct -- keep in sync with EngineConfig in src/stdcs/cs/EngineConfig.cs; buck_layout_engine_config is the assertion seam that catches drift. The fields feed logging::configure at create (last-wins across engines; logging is process-scoped).
+/// The first hand-mirrored `#[repr(C)]` struct -- keep in sync with EngineConfig in src/core/cs/EngineConfig.cs; buck_layout_engine_config is the assertion seam that catches drift. The fields feed logging::configure at create (last-wins across engines; logging is process-scoped).
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct EngineConfig {
