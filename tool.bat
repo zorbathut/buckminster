@@ -11,8 +11,10 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 py -3 "%~dp0\tools\lib\bootstrap.py" %*
-if %errorlevel% neq 0 pause
-exit /b
+set BUCK_EXIT=%errorlevel%
+REM The pause is a double-click convenience for interactive failures; CI (which defines CI=true) must not wait on a keypress. The errorlevel capture is defensive hardening, not a bugfix: pause and bare exit /b both preserve errorlevel, but an explicit BUCK_EXIT survives future edits inserting commands that do clobber it.
+if %BUCK_EXIT% neq 0 if not defined CI pause
+exit /b %BUCK_EXIT%
 '
 # Shell script part
 if ! command -v python3 >/dev/null 2>&1; then

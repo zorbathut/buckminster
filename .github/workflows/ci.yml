@@ -1,4 +1,4 @@
-# CI: the M3 test matrix on Linux.
+# CI: the M3 test matrix on Linux, plus the M5 Windows build check.
 #
 # First executed 2026-07-11 (run 29169258662): green on the first try, all six matrix cells, ~2m15s.
 #
@@ -26,3 +26,17 @@ jobs:
         run: ./tool.bat check
       - name: Full test matrix
         run: ./tool.bat test-all
+
+  # The M5 Windows build check (PLAN M5 item 4): build-only, not the test matrix -- the daily matrix stays Linux, Windows proves the toolchain and the .dll wiring compile+link. Runs tool.bat's cmd branch deliberately (the path a Windows user double-clicks); its on-failure pause is CI-defused inside tool.bat.
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install the wasm-tools workload
+        run: dotnet workload install wasm-tools
+      - name: Build (native + wasm + solution)
+        shell: cmd
+        run: .\tool.bat build

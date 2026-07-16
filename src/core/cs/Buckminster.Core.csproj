@@ -3,8 +3,9 @@
     <PropertyGroup>
         <!-- delegate* unmanaged function pointers in the FFI bindings. -->
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-        <!-- cargo builds the debug profile today; profile selection becomes a property when a release path exists. Windows (.dll) joins at M5. -->
+        <!-- cargo builds the debug profile today; profile selection becomes a property when a release path exists. Host-OS conditional: cargo names the cdylib libbuckminster_core.so on Linux and buckminster_core.dll on Windows (DllImport("buckminster_core") resolves both); macOS (.dylib) waits for the mac target. -->
         <BuckNativeLibrary>../../target/debug/libbuckminster_core.so</BuckNativeLibrary>
+        <BuckNativeLibrary Condition="$([MSBuild]::IsOSPlatform('Windows'))">../../target/debug/buckminster_core.dll</BuckNativeLibrary>
     </PropertyGroup>
 
     <ItemGroup>
@@ -13,7 +14,7 @@
         <InternalsVisibleTo Include="Buckminster.Host.Web" />
         <InternalsVisibleTo Include="Buckminster.Host.WasmNode" />
         <!-- None + CopyToOutputDirectory flows transitively through ProjectReference, so test and host projects get the native library with no wiring of their own. -->
-        <None Include="$(BuckNativeLibrary)" Link="libbuckminster_core.so" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+        <None Include="$(BuckNativeLibrary)" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
     </ItemGroup>
 
     <!-- Loud, instructive failure when cargo hasn't run, instead of MSBuild's cryptic missing-file copy error. Skipped for IDE design-time builds so project load on a clean checkout doesn't half-fail with the message buried. -->

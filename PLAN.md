@@ -133,7 +133,7 @@ Before designing the event vocabulary and window API, read Godot's `DisplayServe
 3. Desktop host opens a window; close button and Escape both quit via the C# side deciding to stop the loop.
 4. CI, phase two (phase one landed in M3): add the Windows build check, and the script-driven browser test runs if they weren't already CI-able at M3. Windows CI must not enter `tool.bat`'s cmd branch blindly: its on-failure `pause` (a double-click-convenience yank from planefarer) waits for a keypress — invoke via bash, or make the pause interactive-only first.
 
-**Done when:** window opens on Linux (Wayland + X11 via winit), resize/close/key events observably reach C#, clean shutdown; CI green including the Windows build check. No unit tests for the window itself (UI exemption); event plumbing is tested via host-injected fake events.
+**Done when:** window opens on Linux (Wayland + X11 via winit), resize/close/key events observably reach C#, clean shutdown; CI green including the Windows build check. No unit tests for the window itself (UI exemption); event plumbing is tested via host-injected fake events. **Met:** visible window on both backends (visibility took an interim softbuffer clear present — Wayland maps a window only once a buffer is committed, the sharpest lesson of the milestone), Escape and close-button both owner-verified live, events pixel-and-log verified through the full poll/inject/dispatch path, the injection seam unit-tested on every cell, and the Windows build check green on its first run (the .dll wiring and the tool.bat cmd branch included).
 
 ### M6 — RLL: WebGPU init and headless clear
 
