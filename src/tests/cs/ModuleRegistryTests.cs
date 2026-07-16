@@ -38,6 +38,10 @@ public class ModuleRegistryTests
             journal.Add($"init {name}");
         }
 
+        public void PumpEvents(Engine engine)
+        {
+        }
+
         public void Tick(Engine engine, double dt)
         {
             journal.Add($"tick {name}");
@@ -77,6 +81,10 @@ public class ModuleRegistryTests
         {
         }
 
+        public void PumpEvents(Engine engine)
+        {
+        }
+
         public void Tick(Engine engine, double dt)
         {
         }
@@ -90,6 +98,10 @@ public class ModuleRegistryTests
         }
 
         public void Initialize(Engine engine)
+        {
+        }
+
+        public void PumpEvents(Engine engine)
         {
         }
 
@@ -174,6 +186,10 @@ public class ModuleRegistryTests
         {
         }
 
+        public void PumpEvents(Engine engine)
+        {
+        }
+
         public void Tick(Engine engine, double dt)
         {
         }
@@ -188,6 +204,10 @@ public class ModuleRegistryTests
         }
 
         public void Initialize(Engine engine)
+        {
+        }
+
+        public void PumpEvents(Engine engine)
         {
         }
 
@@ -206,6 +226,10 @@ public class ModuleRegistryTests
         public void Initialize(Engine engine)
         {
             engine.RegisterModule(new ModuleCycleSelf());
+        }
+
+        public void PumpEvents(Engine engine)
+        {
         }
 
         public void Tick(Engine engine, double dt)

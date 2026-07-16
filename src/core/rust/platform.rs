@@ -504,8 +504,8 @@ pub unsafe extern "C" fn buck_window_size(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn buck_layout_platform_event(
     out_size: *mut u32,
-    out_kind: *mut u32,
     out_window: *mut u32,
+    out_kind: *mut u32,
     out_data0: *mut u32,
     out_data1: *mut u32,
     out_data2: *mut u32,
@@ -513,8 +513,8 @@ pub unsafe extern "C" fn buck_layout_platform_event(
     guard(|| {
         unsafe {
             *out_size = std::mem::size_of::<PlatformEventRaw>() as u32;
-            *out_kind = std::mem::offset_of!(PlatformEventRaw, kind) as u32;
             *out_window = std::mem::offset_of!(PlatformEventRaw, window) as u32;
+            *out_kind = std::mem::offset_of!(PlatformEventRaw, kind) as u32;
             *out_data0 = std::mem::offset_of!(PlatformEventRaw, data0) as u32;
             *out_data1 = std::mem::offset_of!(PlatformEventRaw, data1) as u32;
             *out_data2 = std::mem::offset_of!(PlatformEventRaw, data2) as u32;

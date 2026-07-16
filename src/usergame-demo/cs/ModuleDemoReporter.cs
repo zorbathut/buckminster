@@ -24,6 +24,10 @@ public sealed class ModuleDemoReporter : IModule
         Log.Info($"ModuleDemoReporter initialized; running to {TicksToRun} ticks");
     }
 
+    public void PumpEvents(Engine engine)
+    {
+    }
+
     public void Tick(Engine engine, double dt)
     {
         if (clock.Ticks % 25 == 0)

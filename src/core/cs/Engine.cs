@@ -111,6 +111,14 @@ public sealed class Engine : IDisposable
                 }
                 IsReady = true;
             }
+            else
+            {
+                // Module pumps run on Ready-and-later pumps only -- the init pump runs none, so a module's PumpEvents is never called before its Initialize (the IModule contract, pinned by EnginePumpTests).
+                foreach (IModule module in modules)
+                {
+                    module.PumpEvents(this);
+                }
+            }
         }
         finally
         {

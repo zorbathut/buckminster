@@ -24,6 +24,10 @@ public class EngineExitTests
             engine.QueueExit();
         }
 
+        public void PumpEvents(Engine engine)
+        {
+        }
+
         public void Tick(Engine engine, double dt)
         {
         }
@@ -39,6 +43,10 @@ public class EngineExitTests
         }
 
         public void Initialize(Engine engine)
+        {
+        }
+
+        public void PumpEvents(Engine engine)
         {
         }
 

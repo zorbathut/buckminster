@@ -34,6 +34,10 @@ public class EngineCurrentTests
             Observed.Add(Engine.Current);
         }
 
+        public void PumpEvents(Engine engine)
+        {
+        }
+
         public void Tick(Engine engine, double dt)
         {
             Observed.Add(Engine.Current);
@@ -64,6 +68,10 @@ public class EngineCurrentTests
             Observed.Add(Engine.Current);
         }
 
+        public void PumpEvents(Engine engine)
+        {
+        }
+
         public void Tick(Engine engine, double dt)
         {
         }
@@ -79,6 +87,10 @@ public class EngineCurrentTests
         }
 
         public void Initialize(Engine engine)
+        {
+        }
+
+        public void PumpEvents(Engine engine)
         {
         }
 
@@ -98,6 +110,10 @@ public class EngineCurrentTests
         public void Initialize(Engine engine)
         {
             throw new InvalidOperationException("deliberate init failure");
+        }
+
+        public void PumpEvents(Engine engine)
+        {
         }
 
         public void Tick(Engine engine, double dt)
@@ -173,6 +189,10 @@ public class EngineCurrentTests
         }
 
         public void Initialize(Engine engine)
+        {
+        }
+
+        public void PumpEvents(Engine engine)
         {
         }
 

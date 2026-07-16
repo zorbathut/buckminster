@@ -57,6 +57,52 @@ internal static partial class NativeMethods
     }
 
     [LibraryImport(Library)]
+    internal static partial FfiCode buck_platform_pump();
+
+    [LibraryImport(Library)]
+    internal static unsafe partial FfiCode buck_platform_events_poll(PlatformEventRaw* buf, uint cap, out uint written, out uint remaining);
+
+    [LibraryImport(Library)]
+    private static unsafe partial FfiCode buck_window_create(byte* titlePtr, nuint titleLen, uint width, uint height, out ulong window);
+
+    // Friendly wrapper over the span-pair convention, same shape as EmitLog.
+    internal static unsafe FfiCode WindowCreate(string title, uint width, uint height, out ulong window)
+    {
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(title);
+        fixed (byte* pointer = bytes)
+        {
+            return buck_window_create(pointer, (nuint)bytes.Length, width, height, out window);
+        }
+    }
+
+    [LibraryImport(Library)]
+    internal static partial FfiCode buck_window_destroy(ulong window);
+
+    [LibraryImport(Library)]
+    private static unsafe partial FfiCode buck_window_set_title(ulong window, byte* titlePtr, nuint titleLen);
+
+    internal static unsafe FfiCode WindowSetTitle(ulong window, string title)
+    {
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(title);
+        fixed (byte* pointer = bytes)
+        {
+            return buck_window_set_title(window, pointer, (nuint)bytes.Length);
+        }
+    }
+
+    [LibraryImport(Library)]
+    internal static partial FfiCode buck_window_size(ulong window, out uint width, out uint height);
+
+    [LibraryImport(Library)]
+    internal static partial FfiCode buck_layout_platform_event(out uint size, out uint offsetWindow, out uint offsetKind, out uint offsetData0, out uint offsetData1, out uint offsetData2);
+
+    [LibraryImport(Library)]
+    internal static unsafe partial FfiCode buck_test_keycode_name(uint value, byte* buf, nuint cap, out nuint length);
+
+    [LibraryImport(Library)]
+    internal static partial FfiCode buck_test_keycode_count(out uint count);
+
+    [LibraryImport(Library)]
     private static partial IntPtr buck_last_error_message();
 
     // Null when the last buck_* call on this thread succeeded. The native pointer is only valid until the next buck_* call on this thread (reading via buck_last_error_message itself is non-destructive), so copy to a managed string immediately.

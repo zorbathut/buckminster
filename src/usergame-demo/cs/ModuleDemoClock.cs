@@ -17,6 +17,10 @@ public sealed class ModuleDemoClock : IModule
         Log.Info("ModuleDemoClock initialized");
     }
 
+    public void PumpEvents(Engine engine)
+    {
+    }
+
     public void Tick(Engine engine, double dt)
     {
         Ticks += 1;
