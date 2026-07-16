@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- The four-part model's usergame (PLAN.md foundation decisions), demo edition: pure managed code referencing only Core, statically linked into the desktop host as the degenerate case of usergame loading. TFM/nullable/warnings come from src/Directory.Build.props. -->
+
+    <ItemGroup>
+        <ProjectReference Include="../../core/cs/Buckminster.Core.csproj" />
+    </ItemGroup>
+
+</Project>

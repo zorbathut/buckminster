@@ -6,6 +6,7 @@
 
     <ItemGroup>
         <ProjectReference Include="../../core/cs/Buckminster.Core.csproj" />
+        <ProjectReference Include="../../usergame-demo/cs/Buckminster.Usergame.Demo.csproj" />
     </ItemGroup>
 
 </Project>

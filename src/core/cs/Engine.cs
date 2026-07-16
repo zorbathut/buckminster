@@ -31,6 +31,9 @@ public sealed class Engine : IDisposable
 
     public bool IsReady { get; private set; }
 
+    // The deferred exit flag (GLFW WindowShouldClose lineage): QueueExit's caller is typically a module mid-Tick, sitting under the engine's own iteration, where synchronous teardown is impossible -- so the frame finishes and the host loop condition is what honors the flag. The engine itself never acts on it; ticking past it is legal and fully functional, honoring it is host policy. A future platform close event feeds INTO QueueExit rather than reading this. Read stays valid post-Dispose like IsReady/TickCount.
+    public bool ExitQueued { get; private set; }
+
     // Completed ticks. Increments only after the modules and the native tick have all run, so a thrown module Tick can't desync this from the Rust-side counter.
     public ulong TickCount { get; private set; }
 
@@ -74,6 +77,13 @@ public sealed class Engine : IDisposable
             throw new InvalidOperationException($"module type {module.GetType().Name} is already registered; dependencies are declared by concrete type, so duplicates would be ambiguous");
         }
         modules.Add(module);
+    }
+
+    // Idempotent, and legal pre-Ready (a module may queue exit from its own Initialize).
+    public void QueueExit()
+    {
+        ThrowIfDisposed();
+        ExitQueued = true;
     }
 
     public void PumpEvents()

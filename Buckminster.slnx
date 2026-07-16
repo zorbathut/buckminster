@@ -2,6 +2,7 @@
     <Project Path="src/core/cs/Buckminster.Core.csproj" />
     <Project Path="src/general/cs/Buckminster.General.csproj" />
     <Project Path="src/tests/cs/Buckminster.Tests.csproj" />
+    <Project Path="src/usergame-demo/cs/Buckminster.Usergame.Demo.csproj" />
     <Project Path="src/host-desktop/cs/Buckminster.Host.Desktop.csproj" />
     <Project Path="src/host-web/cs/Buckminster.Host.Web.csproj" />
     <Project Path="src/host-wasmnode/cs/Buckminster.Host.WasmNode.csproj" />

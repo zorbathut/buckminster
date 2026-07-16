@@ -16,9 +16,10 @@
     </ItemGroup>
 
     <ItemGroup>
-        <!-- The M3 test matrix: the same test sources dotnet test runs natively, compiled INTO this host (linked sources, not a ProjectReference to the MTP exe, which would drag the test-platform assemblies into a wasm AppBundle they can't run in). InternalsVisibleTo already covers this assembly. The General reference exists for these linked sources, not the host's own code. -->
+        <!-- The M3 test matrix: the same test sources dotnet test runs natively, compiled INTO this host (linked sources, not a ProjectReference to the MTP exe, which would drag the test-platform assemblies into a wasm AppBundle they can't run in). InternalsVisibleTo already covers this assembly. The General and Usergame.Demo references exist for these linked sources, not the host's own code. -->
         <Compile Include="../../tests/cs/**/*.cs" Exclude="../../tests/cs/obj/**;../../tests/cs/bin/**" Link="Tests/%(Filename)%(Extension)" />
         <ProjectReference Include="../../general/cs/Buckminster.General.csproj" />
+        <ProjectReference Include="../../usergame-demo/cs/Buckminster.Usergame.Demo.csproj" />
         <PackageReference Include="NUnit" Version="4.6.1" />
     </ItemGroup>
 

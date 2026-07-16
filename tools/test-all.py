@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+from typing import cast
 
 from lib import toolchains
 from lib import util
@@ -40,6 +41,36 @@ def _run_browser_page(chrome: str | None, serve_dir: str, page: str, label: str)
         print(f"FAIL: {label}: the page never produced the BUCK-TEST-EXIT sentinel (see captured output above)")
         return False
     return code == 0
+
+
+# The M4 done-when demo, end to end as shipped: the built desktop host runs the demo usergame to 100 ticks and exits clean. Runs the dll scons already built (dotnet run would rebuild outside scons's rust-before-dotnet ordering). Exit 0 alone is not a pass: the sentinel line proves the demo actually ran.
+def _run_desktop_smoke(dotnet: str, src: str) -> bool:
+    command = [dotnet, os.path.join(src, "host-desktop", "cs", "bin", "Debug", "net10.0", "Buckminster.Host.Desktop.dll")]
+    print("Executing: " + " ".join(command))
+    ok = True
+    try:
+        completed = subprocess.run(command, cwd=util.repo_root(), capture_output=True, text=True, timeout=120)
+        print(completed.stdout, end="")
+        if completed.stderr:
+            print("--- host stderr ---")
+            print(completed.stderr, end="")
+        if completed.returncode != 0:
+            print(f"FAIL: the desktop host exited with code {completed.returncode}")
+            ok = False
+        if "BUCK-DEMO-EXIT ticks=100" not in completed.stdout.splitlines():
+            print("FAIL: the desktop host never printed the exact 'BUCK-DEMO-EXIT ticks=100' sentinel line; exit 0 without the demo provably running is not a pass")
+            ok = False
+    except subprocess.TimeoutExpired as error:
+        # The exception carries whatever the host printed before hanging; swallowing it would make a hang undiagnosable.
+        for stream_name, partial in (("stdout", error.stdout), ("stderr", error.stderr)):
+            # The runtime type here is platform-and-path-dependent even with text=True (CPython's POSIX partial-output path joins raw bytes and never decodes; Windows' post-kill re-communicate yields str), so neither typeshed's bytes|None nor an assumption can be trusted; cast to object (an annotation doesn't defeat pyright's narrowing, a cast does) and handle both.
+            partial_widened = cast(object, partial)
+            if partial_widened:
+                print(f"--- partial {stream_name} before timeout ---")
+                print(partial_widened.decode(errors="replace") if isinstance(partial_widened, bytes) else partial_widened)
+        print("FAIL: the desktop host timed out after 120s; the demo usergame never queued exit (partial output above)")
+        ok = False
+    return ok
 
 
 def run(args: list[str]) -> None:
@@ -83,6 +114,9 @@ def run(args: list[str]) -> None:
 
     _banner("cs-native")
     results.append(("cs-native", _run_section([tc.dotnet, "test", "--solution", "Buckminster.slnx", "--no-build"], cwd=util.repo_root())))
+
+    _banner("cs-desktop-host")
+    results.append(("cs-desktop-host", _run_desktop_smoke(tc.dotnet, src)))
 
     _banner("cs-wasm-node")
     bundle = os.path.join(src, "host-wasmnode", "cs", "bin", "Debug", "net10.0", "browser-wasm", "AppBundle")
