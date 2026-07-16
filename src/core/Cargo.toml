@@ -10,6 +10,15 @@ path = "rust/lib.rs"
 # cdylib is what C# loads natively; rlib is for integration tests and future dependent crates (in-crate unit tests work without it). The emscripten staticlib is deliberately NOT listed: it's produced per-invocation via `cargo rustc --crate-type staticlib` (build-rust-wasm), because listing it here would make wasm builds also attempt the cdylib link, which needs emcc at cargo time -- an archive needs no linker at all.
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# The windowing platform layer (PLAN.md M5). Default-on: the buck_platform_*/buck_window_* symbols must exist on every target (the wasm static link resolves the pinvoke table by name and fails on undefined symbols), so wasm builds compile the module too -- as loud stubs there, since winit has no emscripten backend.
+default = ["window"]
+window = ["dep:winit"]
+
 [dependencies]
-# The logging facade (PLAN.md M4 item 4): records buffer behind it in logging.rs and drain to the C# sink. First and so far only external dependency of the core crate.
+# The logging facade (PLAN.md M4 item 4): records buffer behind it in logging.rs and drain to the C# sink.
 log = "0.4"
+
+# winit is native-only: its wasm backend is wasm-bindgen/wasm32-unknown-unknown, not emscripten, so the emscripten build compiles platform stubs instead (platform.rs). Pinned exact: 0.31 is a breaking redesign in beta (dyn traits, moved pump module) and the pump-events surface is version-sensitive.
+[target.'cfg(not(target_os = "emscripten"))'.dependencies]
+winit = { version = "=0.30.13", optional = true }

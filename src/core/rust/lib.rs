@@ -2,7 +2,9 @@
 
 mod engine;
 mod ffi;
+pub mod keycode;
 pub mod logging;
+pub mod platform;
 pub mod rid;
 
 use ffi::{FfiCode, FfiError, guard};
