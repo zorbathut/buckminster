@@ -45,7 +45,7 @@ def _run_browser_page(chrome: str | None, serve_dir: str, page: str, label: str)
 
 # The M4 done-when demo, end to end as shipped: the built desktop host runs the demo usergame to 100 ticks and exits clean. Runs the dll scons already built (dotnet run would rebuild outside scons's rust-before-dotnet ordering). Exit 0 alone is not a pass: the sentinel line proves the demo actually ran.
 def _run_desktop_smoke(dotnet: str, src: str) -> bool:
-    command = [dotnet, os.path.join(src, "host-desktop", "cs", "bin", "Debug", "net10.0", "Buckminster.Host.Desktop.dll")]
+    command = [dotnet, os.path.join(src, "host-desktop", "cs", "bin", "Debug", "net10.0", "Buckminster.Host.Desktop.dll"), "--headless"]
     print("Executing: " + " ".join(command))
     ok = True
     try:

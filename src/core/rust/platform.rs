@@ -36,6 +36,8 @@ pub const MODIFIER_META: u32 = 8;
 mod native {
     use std::cell::RefCell;
     use std::collections::HashMap;
+    use std::num::NonZeroU32;
+    use std::rc::Rc;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
 
@@ -74,8 +76,38 @@ mod native {
         height: u32,
     }
 
+    // softbuffer 0RGB: dark slate -- obviously a window, obviously not rendering yet.
+    const CLEAR_COLOR: u32 = 0x0020_2430;
+
+    // A live window plus its interim clear presenter. Field order is drop order: surface before context before window. The presenter exists because Wayland MAPS a window only once a buffer is committed -- without a present, the window is a taskbar entry with no surface on screen (found live at M5); M6's WebGPU surface replaces the fill, the in-callback redraw handling is the permanent shape.
+    struct WindowEntry {
+        surface: softbuffer::Surface<Rc<Window>, Rc<Window>>,
+        _context: softbuffer::Context<Rc<Window>>,
+        window: Rc<Window>,
+    }
+
+    impl WindowEntry {
+        // A present failure is diagnostics, not a crash: log and let the next redraw retry.
+        fn present_clear(&mut self) {
+            let size = self.window.inner_size();
+            let (Some(width), Some(height)) =
+                (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
+            else {
+                return;
+            };
+            let result = self.surface.resize(width, height).and_then(|()| {
+                let mut buffer = self.surface.buffer_mut()?;
+                buffer.fill(CLEAR_COLOR);
+                buffer.present()
+            });
+            if let Err(error) = result {
+                log::warn!("window clear present failed: {error}");
+            }
+        }
+    }
+
     struct App {
-        windows: RidAllocator<Window>,
+        windows: RidAllocator<WindowEntry>,
         by_winit_id: HashMap<WindowId, Rid>,
         events: Vec<PlatformEventRaw>,
         create_queue: Vec<CommandCreate>,
@@ -122,10 +154,30 @@ mod native {
                     .with_inner_size(PhysicalSize::new(command.width, command.height));
                 match event_loop.create_window(attributes) {
                     Ok(window) => {
+                        let window = Rc::new(window);
                         let winit_id = window.id();
-                        let rid = self.windows.insert(window);
-                        self.by_winit_id.insert(winit_id, rid);
-                        self.create_results.push((command.token, Ok(rid)));
+                        match softbuffer::Context::new(window.clone()).and_then(|context| {
+                            softbuffer::Surface::new(&context, window.clone())
+                                .map(|surface| (context, surface))
+                        }) {
+                            Ok((context, surface)) => {
+                                // The first present happens on the RedrawRequested this triggers; until then the window is unmapped on Wayland.
+                                window.request_redraw();
+                                let rid = self.windows.insert(WindowEntry {
+                                    surface,
+                                    _context: context,
+                                    window,
+                                });
+                                self.by_winit_id.insert(winit_id, rid);
+                                self.create_results.push((command.token, Ok(rid)));
+                            }
+                            Err(error) => {
+                                self.create_results.push((
+                                    command.token,
+                                    Err(format!("clear presenter setup failed: {error}")),
+                                ));
+                            }
+                        }
                     }
                     Err(error) => {
                         self.create_results
@@ -149,7 +201,16 @@ mod native {
                 return;
             };
             match event {
+                WindowEvent::RedrawRequested => {
+                    // Serviced synchronously in-callback per winit's pump contract (the noted M6 cliff, arrived early via the clear presenter).
+                    if let Some(entry) = self.windows.get_mut(rid) {
+                        entry.present_clear();
+                    }
+                }
                 WindowEvent::Resized(size) => {
+                    if let Some(entry) = self.windows.get(rid) {
+                        entry.window.request_redraw();
+                    }
                     self.push(rid, EVENT_KIND_RESIZED, size.width, size.height, 0);
                 }
                 WindowEvent::CloseRequested => {
@@ -221,7 +282,7 @@ mod native {
                     use winit::platform::windows::EventLoopBuilderExtWindows;
                     EventLoopBuilderExtWindows::with_any_thread(&mut builder, true);
                 }
-                let event_loop = builder.build().map_err(|error| FfiError::new(FfiCode::InvalidArgument, format!("platform event loop creation failed (headless environment / no display server? WINIT_UNIX_BACKEND overrides backend selection): {error}")))?;
+                let event_loop = builder.build().map_err(|error| FfiError::new(FfiCode::InvalidArgument, format!("platform event loop creation failed (headless environment / no display server? winit selects Wayland when WAYLAND_DISPLAY is set, else X11 via DISPLAY): {error}")))?;
                 *slot = Some(PlatformState { event_loop, app: App::new(), exited: false });
             }
             body(slot.as_mut().expect("just initialized above"))
@@ -308,10 +369,10 @@ mod native {
         with_platform(|state| {
             let rid = Rid::from_raw(rid_raw);
             match state.app.windows.remove(rid) {
-                Ok(window) => {
-                    state.app.by_winit_id.remove(&window.id());
-                    // Dropping the winit Window closes it.
-                    drop(window);
+                Ok(entry) => {
+                    state.app.by_winit_id.remove(&entry.window.id());
+                    // Dropping the entry (surface, then context, then the winit Window) closes it.
+                    drop(entry);
                     Ok(())
                 }
                 Err(why) => Err(FfiError::new(
@@ -325,8 +386,8 @@ mod native {
     pub fn window_set_title(rid_raw: u64, title: &str) -> Result<(), FfiError> {
         with_platform(
             |state| match state.app.windows.get(Rid::from_raw(rid_raw)) {
-                Some(window) => {
-                    window.set_title(title);
+                Some(entry) => {
+                    entry.window.set_title(title);
                     Ok(())
                 }
                 None => Err(FfiError::new(
@@ -340,8 +401,8 @@ mod native {
     pub fn window_size(rid_raw: u64) -> Result<(u32, u32), FfiError> {
         with_platform(
             |state| match state.app.windows.get(Rid::from_raw(rid_raw)) {
-                Some(window) => {
-                    let size = window.inner_size();
+                Some(entry) => {
+                    let size = entry.window.inner_size();
                     Ok((size.width, size.height))
                 }
                 None => Err(FfiError::new(
