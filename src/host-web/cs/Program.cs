@@ -4,7 +4,7 @@ using Buckminster.Tests;
 
 namespace Buckminster.Host.Web;
 
-// The browser host. Its M3 job is running the C# test suite in-host and handing the report to main.js for rendering; this reverts to actual hosting when M4 gives it an engine to host.
+// The browser host. Its job is running the C# test suite in-host and handing the report to main.js for rendering -- the matrix's cs-wasm-browser cell, a permanent role, not scaffolding (the M3-era idea that M4 would "revert" this to hosting was wrong). Real browser hosting arrives with the web render target (M7) and gets designed then, alongside the runner role rather than replacing it.
 internal static class Program
 {
     private static int Main()

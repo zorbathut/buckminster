@@ -6,7 +6,7 @@
         <WasmEmitSymbolMap>false</WasmEmitSymbolMap>
         <!-- Same wasm-opt skew, publish flavor: any optimizing link (-O2 at Release, -Oz at ANY publish) runs a wasm-opt pass that rejects our archive's newer target_features. -O1 skips wasm-opt entirely; unconditional because Debug publish hits it too, and a Debug build link at -O1 instead of -O0 costs little. The optimization loss is accepted until the LLVM/binaryen gap closes (docs/wasm-toolchain.md). -->
         <EmccLinkOptimizationFlag>-O1</EmccLinkOptimizationFlag>
-        <!-- Test-host stance (until M4 makes these real hosts): publish untrimmed. Trimming a reflection-reached test fixture would silently shrink the suite, and nunit.framework's own trim warnings break the build; bundle size is not what these hosts optimize for. Revisit when a shipped web game cares. -->
+        <!-- Test-host stance (the runner role is permanent, per the host Program.cs comments): publish untrimmed. Trimming a reflection-reached test fixture would silently shrink the suite, and nunit.framework's own trim warnings break the build; bundle size is not what these hosts optimize for. Revisit when a shipped web game cares. -->
         <PublishTrimmed>false</PublishTrimmed>
         <!-- buckminster_core.a, not cargo's libbuckminster_core.a: DllImport("buckminster_core") only resolves to statically-linked code when the module name matches a linked file's name, and the lib prefix is not stripped in that match; an unmatched name silently becomes an external wasm import that fails at runtime. build-rust-wasm copies the archive to this name. -->
         <BuckWasmStaticLib>$(MSBuildThisFileDirectory)target/wasm32-unknown-emscripten/debug/buckminster_core.a</BuckWasmStaticLib>

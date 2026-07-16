@@ -41,8 +41,9 @@ All notable changes to this project will be documented in this file.
 
 ### Improved
 
+- ARCHITECTURE.md documents the M4 engine as built (M4 close-out): kernel (lifecycle, module registry, exit seam, poison policy, teardown ordering, RID allocator with the Godot deviations, layout-assertion seam), the log pipeline (both channels, the exit-drain delivery rules, loudness guarantees), the threading model, and the errors-are-bugs FFI convention; the FfiCode list gains EnginePoisoned and the tier stack reflects the C#-side PRNG and the determinism status note. The wasm hosts' comments now state their permanent test-runner role honestly instead of claiming M4 would "revert" them to hosting.
 - `global.json` `rollForward` tightened from `latestFeature` to `latestPatch`: the SDK feature band is part of the verified matched set (a band jump changes the bundled emscripten), so band bumps are now deliberate edits followed by the re-verification checklist.
-- The wasm hosts are in-host test runners until M4 gives them an engine to host: `FfiSmoke` is removed (its coverage was a subset of FfiTests, which now run on every target), the hosts compile the test sources in as linked files, publish untrimmed (`WasmHost.props`), and the emcc link optimization is pinned to `-O1` unconditionally (Debug publish runs the wasm-opt pass too).
+- The wasm hosts are in-host test runners (a permanent role, per the M4 close-out entry above): `FfiSmoke` is removed (its coverage was a subset of FfiTests, which now run on every target), the hosts compile the test sources in as linked files, publish untrimmed (`WasmHost.props`), and the emcc link optimization is pinned to `-O1` unconditionally (Debug publish runs the wasm-opt pass too).
 - Rust exports with out-params (`buck_add`, `buck_callback_invoke`) are now `unsafe extern "C"` with documented safety contracts (clippy's `not_unsafe_ptr_arg_deref`); the C ABI and C# side are unchanged. The Rust tree is now rustfmt-formatted.
 
 ### Fixed

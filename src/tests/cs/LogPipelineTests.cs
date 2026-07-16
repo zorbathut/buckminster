@@ -45,6 +45,21 @@ public class LogPipelineTests
     }
 
     [Test]
+    public void LastErrorSurvivesASinkThatReentersTheFfi()
+    {
+        // The write-last sequencing rule made distinguishable: a sink that re-enters buck_* during a failing call's drain runs a nested guard whose own exit updates the thread's last-error state -- so the outer failure's message survives ONLY because it is stored after the drain. An implementation storing it before the drain passes every other test in this fixture.
+        List<FfiCode> nestedCodes = new List<FfiCode>();
+        using Engine engine = CreateEngine((level, message) => nestedCodes.Add(NativeMethods.buck_add(1, 2, out _)));
+        Assert.That(NativeMethods.buck_engine_create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 0 }, out ulong rawEngine), Is.EqualTo(FfiCode.Ok));
+        Assert.That(NativeMethods.buck_engine_test_log_then_panic(rawEngine), Is.EqualTo(FfiCode.Panic));
+        Assert.That(NativeMethods.LastErrorMessage(), Does.Contain("deliberate panic after logging"));
+        // Journal-style check that the nested calls really ran and succeeded (asserting inside the sink would surface as CallbackError and muddy the path under test).
+        Assert.That(nestedCodes, Is.Not.Empty);
+        Assert.That(nestedCodes, Is.All.EqualTo(FfiCode.Ok));
+        Assert.That(NativeMethods.buck_engine_destroy(rawEngine), Is.EqualTo(FfiCode.Ok));
+    }
+
+    [Test]
     public void ReentrantSinkNeitherRecursesNorLosesRecords()
     {
         List<string> received = new List<string>();
