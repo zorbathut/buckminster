@@ -1,0 +1,5 @@
+error: unsupported argument: expected `public` or `ret_names(...)`
+ --> tests/compile_fail/export_unknown_arg.rs:5:15
+  |
+5 | #[buck_export(frobnicate)]
+  |               ^^^^^^^^^^

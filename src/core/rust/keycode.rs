@@ -6,6 +6,7 @@
 macro_rules! keycodes {
     ($(($name:ident, $value:literal, $winit:ident)),* $(,)?) => {
         /// Physical key code (W3C UI Events `code` semantics): identifies the key's position, not its layout-dependent meaning. `Unidentified = 0` is the loud fallback for anything the platform layer can't name.
+        #[crate::ffi::buck_enum(public)]
         #[repr(u32)]
         #[derive(Clone, Copy, PartialEq, Eq, Debug)]
         pub enum KeyCode {

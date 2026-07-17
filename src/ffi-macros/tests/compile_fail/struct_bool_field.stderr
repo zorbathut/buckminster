@@ -1,0 +1,5 @@
+error: bool fields are outside the FFI vocabulary (no C-ABI-agreed width in a mirrored struct); use u8
+ --> tests/compile_fail/struct_bool_field.rs:6:11
+  |
+6 |     flag: bool,
+  |           ^^^^

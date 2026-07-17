@@ -1,0 +1,5 @@
+error: bool slices are outside the FFI vocabulary (no element-wise conversion layer); use u8
+ --> tests/compile_fail/export_bool_slice.rs:6:17
+  |
+6 | fn probe(flags: &[bool]) -> Result<(), MyErr> {
+  |                 ^^^^^^^

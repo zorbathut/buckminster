@@ -1,0 +1,5 @@
+error: ret_names(...) names 3 values but the fn returns 2
+ --> tests/compile_fail/export_ret_names_arity.rs:6:12
+  |
+6 | fn probe() -> Result<(u32, u32), MyErr> {
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^

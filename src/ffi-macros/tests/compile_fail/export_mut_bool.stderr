@@ -1,0 +1,5 @@
+error: &mut bool is outside the FFI vocabulary (bool has no in-place raw representation); use &mut u8 or a return value
+ --> tests/compile_fail/export_mut_bool.rs:6:16
+  |
+6 | fn probe(flag: &mut bool) -> Result<(), MyErr> {
+  |                ^^^^^^^^^

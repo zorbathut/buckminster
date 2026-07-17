@@ -89,11 +89,14 @@ def run(args: list[str]) -> None:
     results: list[tuple[str, bool]] = []
 
     _banner("rust-native")
-    results.append(("rust-native", _run_section([tc.cargo, "test", "--workspace"], cwd=src)))
+    # Two invocations, deliberately: plain `cargo test` covers the default-members (which exclude buckminster-ffi-dump so its ffi-dump feature can't unify into shipped artifacts -- src/Cargo.toml), and the explicit -p run tests the dump bin in its own feature-resolution universe.
+    rust_native_ok = _run_section([tc.cargo, "test"], cwd=src)
+    rust_native_ok = _run_section([tc.cargo, "test", "-p", "buckminster-ffi-dump"], cwd=src) and rust_native_ok
+    results.append(("rust-native", rust_native_ok))
 
     _banner("rust-wasm-node")
-    # The node cells get timeouts because a hung wasm runtime otherwise stalls the matrix (and CI) forever; the browser cells are already bounded by the CDP driver's own timeout.
-    results.append(("rust-wasm-node", _run_section([tc.cargo, "test", "--workspace", "--target", "wasm32-unknown-emscripten"], cwd=src, env=emsdk, timeout=600)))
+    # The node cells get timeouts because a hung wasm runtime otherwise stalls the matrix (and CI) forever; the browser cells are already bounded by the CDP driver's own timeout. Default-members only: the dump bin is host-native tooling and never builds for wasm.
+    results.append(("rust-wasm-node", _run_section([tc.cargo, "test", "--target", "wasm32-unknown-emscripten"], cwd=src, env=emsdk, timeout=600)))
 
     _banner("rust-wasm-browser")
     ok = True

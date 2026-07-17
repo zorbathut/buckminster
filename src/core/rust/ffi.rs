@@ -1,10 +1,22 @@
-//! The FFI entry-point rails: every fallible `buck_*` export is a thin `extern "C"` fn whose body runs inside [`guard`], which contains panics, maps errors to codes, and stores the message for [`buck_last_error_message`].
+//! The FFI entry-point rails: every fallible `buck_*` export is a thin `extern "C"` fn whose body runs inside [`guard`], which contains panics, maps errors to codes, and stores the message for [`buck_last_error_message`]. Public because macro-generated export wrappers (buckminster-ffi-macros) call these through the stable `::buckminster_core::ffi::` path -- from this crate and from any future module crate that depends on core alike.
 
 use std::cell::RefCell;
 use std::ffi::{CString, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-// Error codes returned by every fallible buck_* export. Hand-mirrored on the C# side -- keep in sync with FfiCode in src/core/cs/Ffi/FfiCode.cs. Future codes append; no generic catch-all.
+// Re-exported so exporting code imports the attribute macros and the rails from one place (`use crate::ffi::{buck_export, guard, ...}`).
+pub use buckminster_ffi_macros::{buck_enum, buck_export, buck_struct};
+
+#[cfg(feature = "ffi-dump")]
+pub use inventory;
+#[cfg(feature = "ffi-dump")]
+pub mod meta;
+
+/// Marker implemented by every #[buck_struct]/#[buck_enum] type. #[buck_export] asserts it for each mirrored type in a signature, so an unmarked type fails EVERY build with a trait error, not just dump builds.
+pub trait BuckMirrored {}
+
+/// Error codes returned by every fallible buck_* export. Hand-mirrored on the C# side until the chunk-2 emitter takes over -- keep in sync with FfiCode in src/core/cs/Ffi/FfiCode.cs. Future codes append; no generic catch-all.
+#[buck_enum]
 #[repr(i32)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FfiCode {
@@ -15,6 +27,7 @@ pub enum FfiCode {
     EnginePoisoned = 4,
 }
 
+/// The FFI-problem channel: stale/destroyed handles, poisoned engines, wrong-thread calls, protocol violations (bad pointers, invalid UTF-8), unconfigured subsystems. Surfaced to C# as exceptions because hitting one means a bug or a dead object -- never expected control flow. Domain failures (an operation that can legitimately not succeed) are NOT FfiErrors: model them as ordinary returned data, and give the export the plain non-Result form when it has no FFI-lifecycle concerns at all.
 pub struct FfiError {
     pub code: FfiCode,
     pub message: String,
@@ -32,21 +45,6 @@ impl FfiError {
 thread_local! {
     // The message backing buck_last_error_message, per calling thread. None whenever the last guarded call on this thread succeeded.
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
-}
-
-// CString::new fails on interior NULs; the message must never be silently lost, so sanitize instead.
-fn store_error(message: String) {
-    let sanitized = message.replace('\0', "\\0");
-    let cstring = CString::new(sanitized).expect("no interior NULs remain after sanitizing");
-    LAST_ERROR.with(|slot| {
-        *slot.borrow_mut() = Some(cstring);
-    });
-}
-
-fn clear_error() {
-    LAST_ERROR.with(|slot| {
-        *slot.borrow_mut() = None;
-    });
 }
 
 /// Runs an export body with the standard rails: `catch_unwind` so no panic crosses the FFI, the exit-drain (buffered log records deliver at the tail of EVERY export, records-before-result -- see logging::drain_at_exit), error-to-code mapping, and last-error storage. Success clears the stored error, so a null from `buck_last_error_message` always means "last call on this thread succeeded".
@@ -93,6 +91,21 @@ pub fn guard(body: impl FnOnce() -> Result<(), FfiError>) -> i32 {
     }
 }
 
+// CString::new fails on interior NULs; the message must never be silently lost, so sanitize instead.
+fn store_error(message: String) {
+    let sanitized = message.replace('\0', "\\0");
+    let cstring = CString::new(sanitized).expect("no interior NULs remain after sanitizing");
+    LAST_ERROR.with(|slot| {
+        *slot.borrow_mut() = Some(cstring);
+    });
+}
+
+fn clear_error() {
+    LAST_ERROR.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
+}
+
 /// The human-readable text of a caught panic payload. Shared by `guard` and the engine-scoped inner catch (engine.rs), which converts a panic into a poison + Panic-coded FfiError instead of letting it unwind through the ENGINES MutexGuard.
 pub fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     if let Some(text) = payload.downcast_ref::<&str>() {
@@ -102,6 +115,25 @@ pub fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     } else {
         "panic payload of unknown type".to_string()
     }
+}
+
+/// The (ptr, len) span contract for string-taking exports, with the empty-span null pointer allowance (C#'s fixed on an empty array pins null; from_raw_parts(null, 0) is UB-adjacent and must never be constructed). Shared by hand-written exports and macro-generated wrappers alike.
+///
+/// # Safety
+/// `ptr` must point to `len` readable bytes when `len > 0` (invalid UTF-8 is rejected as an error, not UB).
+pub unsafe fn utf8_arg<'a>(ptr: *const u8, len: usize, what: &str) -> Result<&'a str, FfiError> {
+    if len == 0 {
+        return Ok("");
+    }
+    if ptr.is_null() {
+        return Err(FfiError::new(
+            FfiCode::InvalidArgument,
+            format!("{what}: null pointer with nonzero length"),
+        ));
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    std::str::from_utf8(bytes)
+        .map_err(|_| FfiError::new(FfiCode::InvalidArgument, format!("{what}: not valid UTF-8")))
 }
 
 /// Null if the last `buck_*` call on this thread succeeded; otherwise the error message, valid until the next `buck_*` call other than `buck_last_error_message` itself on the same thread (reading is non-destructive and repeatable). Callers copy immediately. This is the one deliberate exception to "every export runs inside guard": it is infallible, and routing it through guard would clear the very error it exists to read.

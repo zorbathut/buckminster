@@ -1,0 +1,5 @@
+error: #[buck_export] fns take no self
+ --> tests/compile_fail/export_self_param.rs:4:10
+  |
+4 | fn probe(self) -> Result<(), ()> {
+  |          ^^^^

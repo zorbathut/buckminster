@@ -1,0 +1,5 @@
+error: #[buck_export] fns cannot be generic
+ --> tests/compile_fail/export_generic.rs:6:9
+  |
+6 | fn probe<T>(value: i32) -> Result<i32, MyErr> {
+  |         ^^^

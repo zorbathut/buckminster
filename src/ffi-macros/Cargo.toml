@@ -1,0 +1,19 @@
+[package]
+name = "buckminster-ffi-macros"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+# Module layout convention: language subdirs inside src/<module>/, so the crate root lives in rust/ rather than cargo's default src/.
+[lib]
+path = "rust/lib.rs"
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+
+[dev-dependencies]
+# Compile-fail tests: "anything outside the vocabulary is a loud compile error" is a stated contract, so the rejection paths are pinned with stderr snapshots (stable under the exact-pinned toolchain).
+trybuild = "1"

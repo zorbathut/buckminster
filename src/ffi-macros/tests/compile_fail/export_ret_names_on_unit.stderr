@@ -1,0 +1,5 @@
+error: ret_names(...) given but the fn returns no value
+ --> tests/compile_fail/export_ret_names_on_unit.rs:6:12
+  |
+6 | fn probe() -> Result<(), MyErr> {
+  |            ^^^^^^^^^^^^^^^^^^^^

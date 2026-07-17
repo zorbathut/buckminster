@@ -1,0 +1,5 @@
+error: unsupported parameter type: mirrored structs pass by reference (&T); bare path types must be scalars or Rid
+  --> tests/compile_fail/export_struct_by_value.rs:10:18
+   |
+10 | fn probe(config: Config) -> Result<i32, MyErr> {
+   |                  ^^^^^^

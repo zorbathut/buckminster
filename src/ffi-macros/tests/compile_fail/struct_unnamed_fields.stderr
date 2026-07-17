@@ -1,0 +1,5 @@
+error: #[buck_struct] requires named fields
+ --> tests/compile_fail/struct_unnamed_fields.rs:5:8
+  |
+5 | struct Probe(u32, u32);
+  |        ^^^^^

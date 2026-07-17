@@ -1,0 +1,5 @@
+error: #[buck_enum] requires #[repr(i32)] or #[repr(u32)] (place #[buck_enum] ABOVE the repr so it can see it)
+ --> tests/compile_fail/enum_missing_repr.rs:4:6
+  |
+4 | enum Probe {
+  |      ^^^^^

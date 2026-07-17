@@ -17,8 +17,9 @@ def run(args: list[str]) -> None:
     env["BUCK_CARGO"] = tc.cargo
     env["BUCK_DOTNET"] = tc.dotnet
     util.run(["scons"], cwd=util.repo_root(), env=env)
-    # cwd src/: cargo workspace + rust-toolchain.toml discovery, same as the build target.
-    util.run([tc.cargo, "test", "--workspace"], cwd=os.path.join(util.repo_root(), "src"))
+    # cwd src/: cargo workspace + rust-toolchain.toml discovery, same as the build target. Two invocations: default-members exclude buckminster-ffi-dump (feature-unification isolation, src/Cargo.toml), so the dump bin tests explicitly.
+    util.run([tc.cargo, "test"], cwd=os.path.join(util.repo_root(), "src"))
+    util.run([tc.cargo, "test", "-p", "buckminster-ffi-dump"], cwd=os.path.join(util.repo_root(), "src"))
     # Microsoft.Testing.Platform mode (opted into via global.json "test.runner" -- the .NET 10 SDK offers no per-project alternative); its CLI takes --solution, not a bare path. --no-build: scons just built this exact configuration, and rebuilding would also re-run the wasm hosts' emcc link.
     util.run([tc.dotnet, "test", "--solution", "Buckminster.slnx", "--no-build"], cwd=util.repo_root())
 

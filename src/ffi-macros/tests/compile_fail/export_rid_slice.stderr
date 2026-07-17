@@ -1,0 +1,5 @@
+error: Rid slices and references are outside the FFI vocabulary; pass Rid by value (or use u64 for bulk handle spans)
+ --> tests/compile_fail/export_rid_slice.rs:8:21
+  |
+8 | fn probe(handles: &[Rid]) -> Result<(), MyErr> {
+  |                     ^^^

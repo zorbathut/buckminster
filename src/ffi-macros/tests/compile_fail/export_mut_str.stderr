@@ -1,0 +1,5 @@
+error: &mut str is outside the FFI vocabulary; string output uses the &mut [u8] byte-buffer idiom
+ --> tests/compile_fail/export_mut_str.rs:6:16
+  |
+6 | fn probe(text: &mut str) -> Result<(), MyErr> {
+  |                ^^^^^^^^

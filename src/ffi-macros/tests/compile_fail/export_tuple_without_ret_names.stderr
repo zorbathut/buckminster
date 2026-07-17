@@ -1,0 +1,5 @@
+error: tuple returns require #[buck_export(ret_names(...))] so out-params and the C# named tuple get real names
+ --> tests/compile_fail/export_tuple_without_ret_names.rs:6:12
+  |
+6 | fn probe() -> Result<(u32, u32), MyErr> {
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^

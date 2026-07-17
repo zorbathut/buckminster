@@ -6,7 +6,7 @@
 //!
 //! Error-code stance, written down deliberately: unavailability (no display server, stub target, dead loop) reports as InvalidArgument with a descriptive message rather than a dedicated code -- per errors-are-bugs, a host that wants to fall back headless PROGRAMMATICALLY needs a capability query (Godot's has_feature analog, future work), not error-code probing.
 
-use crate::ffi::{FfiCode, FfiError, guard};
+use crate::ffi::{FfiCode, FfiError, guard, utf8_arg};
 
 /// The wire shape of one platform event -- hand-mirrored as PlatformEventRaw in C#, drift caught by buck_layout_platform_event. data0..data2 are per-kind: Resized(width, height, -); Key(keycode, key flags, modifiers); FocusChanged(0/1, -, -); CloseRequested(-, -, -). Field order is deliberate: the u64 first keeps the struct padding-free (24 bytes) -- kind-first would pad to 32.
 #[repr(C)]
@@ -448,22 +448,6 @@ mod native {
     pub fn window_size(_rid: u64) -> Result<(u32, u32), FfiError> {
         Err(unavailable())
     }
-}
-
-// Shared by the string-taking exports: the (ptr, len) span contract with the empty-span null pointer allowance (C#'s fixed on an empty array pins null; from_raw_parts(null, 0) is UB-adjacent and must never be constructed).
-unsafe fn utf8_arg<'a>(ptr: *const u8, len: usize, what: &str) -> Result<&'a str, FfiError> {
-    if len == 0 {
-        return Ok("");
-    }
-    if ptr.is_null() {
-        return Err(FfiError::new(
-            FfiCode::InvalidArgument,
-            format!("{what}: null pointer with nonzero length"),
-        ));
-    }
-    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
-    std::str::from_utf8(bytes)
-        .map_err(|_| FfiError::new(FfiCode::InvalidArgument, format!("{what}: not valid UTF-8")))
 }
 
 /// Drives the platform event loop exactly one non-blocking pump. See the module doc for the thread-affinity contract.

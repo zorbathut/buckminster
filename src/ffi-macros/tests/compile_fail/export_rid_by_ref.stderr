@@ -1,0 +1,5 @@
+error: pass Rid by value, not by reference (it is a plain u64 handle)
+ --> tests/compile_fail/export_rid_by_ref.rs:8:18
+  |
+8 | fn probe(engine: &Rid) -> Result<(), MyErr> {
+  |                  ^^^^

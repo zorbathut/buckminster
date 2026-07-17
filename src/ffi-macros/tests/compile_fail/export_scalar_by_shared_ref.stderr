@@ -1,0 +1,5 @@
+error: pass scalars by value, not by shared reference
+ --> tests/compile_fail/export_scalar_by_shared_ref.rs:6:17
+  |
+6 | fn probe(value: &u32) -> Result<u32, MyErr> {
+  |                 ^^^^

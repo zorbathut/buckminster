@@ -24,7 +24,9 @@ def _run_in(cwd: str, command: list[str]) -> int:
 
 def _build_rust() -> int:
     # cwd src/: that's where the cargo workspace, Cargo.lock, and rust-toolchain.toml live (walk-up discovery for all three starts at the cwd).
-    return _run_in(os.path.join(util.repo_root(), "src"), [_tool_env("BUCK_CARGO"), "build", "--workspace"])
+    #
+    # Deliberately NOT --workspace: default-members excludes buckminster-ffi-dump, whose ffi-dump feature would otherwise unify into the shipped cdylib and compile dump-only metadata into it (src/Cargo.toml). The dump bin builds in its own invocation when codegen runs.
+    return _run_in(os.path.join(util.repo_root(), "src"), [_tool_env("BUCK_CARGO"), "build"])
 
 
 def _build_rust_wasm() -> int:

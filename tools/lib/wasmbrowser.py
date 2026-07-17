@@ -195,8 +195,9 @@ var Module = {{
 
 def list_rust_wasm_test_binaries(cargo: str, env: dict[str, str]) -> list[str]:
     """Paths of the wasm test executables (.js files), via cargo's JSON messages -- target/deps globbing lies when stale hash-suffixed binaries accumulate."""
+    # Default-members only (no --workspace): buckminster-ffi-dump is host-native tooling and never builds for wasm (src/Cargo.toml).
     result = subprocess.run(
-        [cargo, "test", "--workspace", "--target", "wasm32-unknown-emscripten", "--no-run", "--message-format=json"],
+        [cargo, "test", "--target", "wasm32-unknown-emscripten", "--no-run", "--message-format=json"],
         cwd=os.path.join(util.repo_root(), "src"), env=env, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
         print(result.stderr)
@@ -205,7 +206,9 @@ def list_rust_wasm_test_binaries(cargo: str, env: dict[str, str]) -> list[str]:
     for line in result.stdout.splitlines():
         message = json.loads(line)
         if message.get("reason") == "compiler-artifact" and message.get("profile", {}).get("test") and message.get("executable"):
-            binaries.append(message["executable"])
+            # Proc-macro crates compile for the HOST even under --target, so their test executables are native binaries with no .js/.wasm pair; they belong to the native cell, not the browser. Emscripten test executables are the .js loader files.
+            if message["executable"].endswith(".js"):
+                binaries.append(message["executable"])
     return binaries
 
 
