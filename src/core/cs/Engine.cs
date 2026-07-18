@@ -52,7 +52,7 @@ public sealed class Engine : IDisposable
         }
         catch
         {
-            // Cleanup ORDER is load-bearing: clear the Rust registration FIRST (dropping the Rust-side proxy fires the release thunk, which unregisters the callback key deterministically), so nothing later can fire a dead key. The two return codes are deliberately unchecked raw calls: with the registration already cleared they can only fail via states that would themselves have thrown above, and the sink's original exception must win.
+            // Cleanup ORDER is load-bearing: clear the Rust registration FIRST (dropping the Rust-side proxy fires the release thunk, which unregisters the callback key deterministically), so nothing later can fire a dead key. The two return codes are deliberately unchecked raw calls: with the registration already cleared they can only fail via states that would themselves have thrown above, and the sink's original exception must win. Known narrow gap: if the set failed BEFORE storing (today only the poisoned-mutex panic path), the proxy was never registered Rust-side, clear releases nothing, and the key leaks -- accepted for a path that already means the process is broken.
             NativeMethods.buck_log_sink_clear();
             NativeMethods.buck_engine_destroy(handle);
             throw;

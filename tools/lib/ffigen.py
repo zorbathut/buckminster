@@ -534,7 +534,7 @@ def _emit_native_methods(exports: list[Export], structs: list[Struct], mirrors: 
     lines.append("")
     lines.append("namespace Buckminster.Ffi;")
     lines.append("")
-    lines.append("// The generated raw import layer: native snake_case names for 1:1 greppability against the Rust exports, FfiCode returns, out-params unspecified on nonzero return. The hand-written part of this class holds the fn-pointer family the generator cannot express yet.")
+    lines.append("// The generated raw import layer: native snake_case names for 1:1 greppability against the Rust exports, FfiCode returns, out-params unspecified on nonzero return. The hand-written part of this class holds only buck_last_error_message and the shared Library constant.")
     lines.append("internal static partial class NativeMethods")
     lines.append("{")
     first = True
@@ -718,9 +718,7 @@ def _thunk_pieces(trait: Trait, method: Method, mirrors: _Mirrors) -> tuple[list
     for param in method.params:
         name = _camel(param.name)
         if param.ty.kind == "scalar" and param.ty.scalar == "bool":
-            take(param.name, "scalar", expected_scalar="u8")
-            thunk_params.append(f"byte {name}")
-            call_args.append(f"{name} != 0")
+            raise GenError(f"{where}: bool trait-method params have no consumer yet; their emission lands with their first consumer")
         elif param.ty.kind == "scalar":
             head = take(param.name, "scalar", expected_scalar=param.ty.scalar)
             thunk_params.append(f"{_raw_scalar_cs(head.scalar, where)} {name}")
@@ -747,18 +745,13 @@ def _thunk_pieces(trait: Trait, method: Method, mirrors: _Mirrors) -> tuple[list
         ret = next(iter(method.returns))
         if ret.ty.kind != "scalar":
             raise GenError(f"{where}: trait-method return shape '{ret.ty.kind}' has no consumer yet")
+        if ret.ty.scalar in ("bool", "usize"):
+            raise GenError(f"{where}: {ret.ty.scalar} trait-method returns have no consumer yet; their emission lands with their first consumer")
         head = take("out_value", "mut_ptr_scalar", expected_scalar=_expected_raw_scalar(ret.ty.scalar))
         raw_cs = _raw_scalar_cs(head.scalar, where)
         thunk_params.append(f"{raw_cs}* outValue")
-        if ret.ty.scalar == "bool":
-            interface_return = "bool"
-            invoke_statement = f"*outValue = (byte)(target.{_pascal(method.name)}({', '.join(call_args)}) ? 1 : 0);"
-        elif ret.ty.scalar == "usize":
-            interface_return = "int"
-            invoke_statement = f"*outValue = (nuint)target.{_pascal(method.name)}({', '.join(call_args)});"
-        else:
-            interface_return = raw_cs
-            invoke_statement = f"*outValue = target.{_pascal(method.name)}({', '.join(call_args)});"
+        interface_return = raw_cs
+        invoke_statement = f"*outValue = target.{_pascal(method.name)}({', '.join(call_args)});"
 
     if raw:
         raise GenError(f"{where}: raw signature has {len(raw)} unconsumed params starting at '{raw[0].name}' (macro/emitter derivation drift)")
@@ -771,7 +764,7 @@ def _interface_params(trait: Trait, method: Method, mirrors: _Mirrors) -> list[s
     for param in method.params:
         name = _camel(param.name)
         if param.ty.kind == "scalar" and param.ty.scalar == "bool":
-            declarations.append(f"bool {name}")
+            raise GenError(f"{where}: bool trait-method params have no consumer yet; their emission lands with their first consumer")
         elif param.ty.kind == "scalar":
             declarations.append(f"{_scalar_cs(param.ty.scalar, where)} {name}")
         elif param.ty.kind == "mirror" and mirrors.is_enum(param.ty.mirror_name):
