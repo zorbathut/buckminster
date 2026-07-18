@@ -153,6 +153,7 @@ class Method:
 class Trait:
     name: str
     docs: tuple[str, ...]
+    public: bool
     vtable: str
     methods: tuple[Method, ...]
 
@@ -270,7 +271,7 @@ def _parse_dump(dump_path: str) -> tuple[list[Export], list[Struct], list[Enum],
                 kind, scalar, mirror = _parse_raw_type(_expect_obj(raw, "ty", method_name), method_name)
                 method_raws.append(RawParam(name=_expect_str(raw, "name", method_name), kind=kind, scalar=scalar, mirror_name=mirror))
             methods.append(Method(name=_expect_str(entry, "name", name), docs=_expect_str_list(entry, "docs", method_name), params=tuple(method_params), returns=tuple(method_returns), raw_params=tuple(method_raws)))
-        traits.append(Trait(name=name, docs=_expect_str_list(data, "docs", name), vtable=_expect_str(data, "vtable", name), methods=tuple(methods)))
+        traits.append(Trait(name=name, docs=_expect_str_list(data, "docs", name), public=_expect_bool(data, "public", name), vtable=_expect_str(data, "vtable", name), methods=tuple(methods)))
 
     return exports, structs, enums, traits
 
@@ -777,11 +778,14 @@ def _interface_params(trait: Trait, method: Method, mirrors: _Mirrors) -> list[s
 
 
 def _emit_trait_interface(trait: Trait, mirrors: _Mirrors) -> str:
+    # Public traits are game-facing API (namespace Buckminster); internal ones (test/infra demonstrators) live with the plumbing, reachable by tests via InternalsVisibleTo.
+    namespace = "Buckminster" if trait.public else "Buckminster.Ffi"
+    visibility = "public" if trait.public else "internal"
     lines = [_HEADER]
-    lines.append("namespace Buckminster;")
+    lines.append(f"namespace {namespace};")
     lines.append("")
     lines.extend(_doc_lines(trait.docs, ""))
-    lines.append(f"public interface I{trait.name}")
+    lines.append(f"{visibility} interface I{trait.name}")
     lines.append("{")
     first = True
     for method in trait.methods:

@@ -164,6 +164,7 @@ pub struct MetaTrait {
     pub crate_name: &'static str,
     pub name: &'static str,
     pub docs: &'static [&'static str],
+    pub public: bool,
     pub vtable: &'static str,
     pub methods: &'static [MetaMethod],
 }

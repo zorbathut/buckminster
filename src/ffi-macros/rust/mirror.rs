@@ -55,7 +55,7 @@ pub fn layout_export(struct_name: &Ident, field_names: &[Ident]) -> TokenStream 
 }
 
 pub fn expand_struct(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
-    let args = shared::parse_args(attr, false)?;
+    let args = shared::parse_args(attr, false, false)?;
     let item: ItemStruct = syn::parse2(item)?;
     if !shared::has_repr(&item.attrs, "C") {
         return Err(syn::Error::new_spanned(
@@ -150,7 +150,7 @@ pub fn expand_struct(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
 }
 
 pub fn expand_enum(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
-    let args = shared::parse_args(attr, false)?;
+    let args = shared::parse_args(attr, false, false)?;
     let item: ItemEnum = syn::parse2(item)?;
     let repr = if shared::has_repr(&item.attrs, "i32") {
         Scalar::I32

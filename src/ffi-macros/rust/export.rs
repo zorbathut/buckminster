@@ -14,7 +14,7 @@ struct RawParam {
 }
 
 pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
-    let args = shared::parse_args(attr, true)?;
+    let args = shared::parse_args(attr, true, false)?;
     let func: ItemFn = syn::parse2(item)?;
 
     let sig = &func.sig;

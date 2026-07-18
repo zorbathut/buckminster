@@ -325,15 +325,21 @@ fn result_payload(ty: &Type) -> Option<&Type> {
     Some(payload)
 }
 
-/// The parsed `(public, ret_names(...))` attribute arguments; ret_names is only legal on #[buck_export].
+/// The parsed `(public, internal, ret_names(...))` attribute arguments; ret_names is only legal on #[buck_export], internal only on #[buck_trait] (whose default is public).
 pub struct MacroArgs {
     pub public: bool,
+    pub internal: bool,
     pub ret_names: Option<Vec<Ident>>,
 }
 
-pub fn parse_args(attr: TokenStream, allow_ret_names: bool) -> syn::Result<MacroArgs> {
+pub fn parse_args(
+    attr: TokenStream,
+    allow_ret_names: bool,
+    allow_internal: bool,
+) -> syn::Result<MacroArgs> {
     let mut args = MacroArgs {
         public: false,
+        internal: false,
         ret_names: None,
     };
     if attr.is_empty() {
@@ -343,8 +349,11 @@ pub fn parse_args(attr: TokenStream, allow_ret_names: bool) -> syn::Result<Macro
         syn::parse::Parser::parse2(Punctuated::parse_terminated, attr)?;
     for meta in metas {
         match &meta {
-            Meta::Path(path) if path.is_ident("public") => {
+            Meta::Path(path) if !allow_internal && path.is_ident("public") => {
                 args.public = true;
+            }
+            Meta::Path(path) if allow_internal && path.is_ident("internal") => {
+                args.internal = true;
             }
             Meta::List(list) if allow_ret_names && list.path.is_ident("ret_names") => {
                 let names: Punctuated<Ident, Token![,]> =
@@ -356,6 +365,8 @@ pub fn parse_args(attr: TokenStream, allow_ret_names: bool) -> syn::Result<Macro
                     meta,
                     if allow_ret_names {
                         "unsupported argument: expected `public` or `ret_names(...)`"
+                    } else if allow_internal {
+                        "unsupported argument: expected `internal`"
                     } else {
                         "unsupported argument: expected `public`"
                     },

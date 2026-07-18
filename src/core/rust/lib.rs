@@ -26,8 +26,8 @@ fn add(a: i32, b: i32) -> Result<i32, FfiError> {
     })
 }
 
-/// Permanent test-only trait: the callback-machinery demonstrator (M1's buck_callback_invoke, generalized). Its C# test implementations do arithmetic, throw, and reenter the FFI, pinning the full round trip on every target.
-#[buck_trait]
+/// Permanent test-only trait: the callback-machinery demonstrator (M1's buck_callback_invoke, generalized). Its C# test implementations do arithmetic, throw, and reenter the FFI, pinning the full round trip on every target. Internal: a test demonstrator must not appear in game-facing C# surface.
+#[buck_trait(internal)]
 pub trait CallbackDemo {
     /// Transforms a value however the implementation likes.
     fn invoke(&mut self, value: i32) -> Result<i32, FfiError>;
