@@ -211,11 +211,11 @@ pub fn drain_at_exit() -> Result<(), FfiError> {
 /// Registers the process-wide log sink (last-wins, like all logging config): takes ownership of the vtable, so replacing or clearing releases the previous registration deterministically. Clearing is a separate export because there is no null vtable.
 #[buck_export]
 fn log_sink_set(sink: &LogSinkVtable) -> Result<(), FfiError> {
-    // mem::replace, not plain assignment: assigning would drop the superseded proxy INSIDE the MutexGuard's scope, firing its release thunk (a C# callback) while Rust holds the lock -- callback rule 4. The old proxy must drop after the guard is gone.
-    let superseded = std::mem::replace(
-        &mut *LOG_SINK.lock().expect("log sink mutex poisoned"),
-        Some(LogSinkProxy::from_vtable(*sink)),
-    );
+    // replace(), not plain assignment: assigning would drop the superseded proxy INSIDE the MutexGuard's scope, firing its release thunk (a C# callback) while Rust holds the lock -- callback rule 4. The old proxy must drop after the guard is gone.
+    let superseded = LOG_SINK
+        .lock()
+        .expect("log sink mutex poisoned")
+        .replace(LogSinkProxy::from_vtable(*sink));
     drop(superseded);
     Ok(())
 }
