@@ -3,16 +3,19 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Mutex;
 
-use crate::ffi::{FfiCode, FfiError, buck_export, buck_struct, guard, panic_message};
+use crate::ffi::{FfiCode, FfiError, buck_export, buck_struct, panic_message};
 use crate::rid::{Rid, RidAllocator, RidError};
 
-/// Engine creation config. The log fields feed logging::configure at create (last-wins across engines; logging is process-scoped). Still hand-mirrored in src/core/cs/EngineConfig.cs until the chunk-2 emitter takes over; buck_layout_engine_config is the assertion seam that catches drift meanwhile.
+/// Engine creation config. The log fields feed logging::configure at create (last-wins across engines; logging is process-scoped).
 #[buck_struct(public)]
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct EngineConfig {
+    /// Threshold for the buffered log channel delivered to the log sink (0 = off .. 5 = trace).
     pub log_level_max: i32,
+    /// Capacity of the log record buffer; oldest records drop (loudly reported) when a host never drains. Must be at least 1.
     pub log_buffer_capacity: u32,
+    /// Threshold for the immediate stderr echo (0 = off .. 5 = trace), independent of log_level_max: records clearing this go to stderr at emit time, before buffering -- the zero-latency, crash-proof diagnostics channel.
     pub log_stderr_level_max: i32,
 }
 
@@ -134,29 +137,5 @@ fn engine_test_log_then_panic(engine: Rid) -> Result<(), FfiError> {
         log::error!("first record before the panic");
         log::error!("second record before the panic");
         panic!("deliberate panic after logging")
-    })
-}
-
-/// The layout-assertion seam for EngineConfig (one export per mirrored struct, one out-param per field): C# compares against Marshal.SizeOf/OffsetOf, the interim protection until FFI binding generation exists.
-///
-/// # Safety
-/// All out-params must be non-null and writable (the standard out-param contract).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn buck_layout_engine_config(
-    out_size: *mut u64,
-    out_offset_log_level_max: *mut u64,
-    out_offset_log_buffer_capacity: *mut u64,
-    out_offset_log_stderr_level_max: *mut u64,
-) -> i32 {
-    guard(|| {
-        unsafe {
-            *out_size = std::mem::size_of::<EngineConfig>() as u64;
-            *out_offset_log_level_max = std::mem::offset_of!(EngineConfig, log_level_max) as u64;
-            *out_offset_log_buffer_capacity =
-                std::mem::offset_of!(EngineConfig, log_buffer_capacity) as u64;
-            *out_offset_log_stderr_level_max =
-                std::mem::offset_of!(EngineConfig, log_stderr_level_max) as u64;
-        }
-        Ok(())
     })
 }

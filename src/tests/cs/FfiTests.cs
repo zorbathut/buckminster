@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using Buckminster;
 using Buckminster.Ffi;
 using NUnit.Framework;
 
@@ -175,5 +176,24 @@ public class FfiTests
         CallbackTable.Unregister(key);
         Assert.That(() => CallbackTable.Get(key), Throws.TypeOf<KeyNotFoundException>());
         Assert.That(() => CallbackTable.Unregister(key), Throws.TypeOf<KeyNotFoundException>());
+    }
+
+    [Test]
+    public void GeneratedBoolMarshalingRoundTrips()
+    {
+        // The emitter's bool-as-u8 paths (param and return, both wrapper conversions) have no production consumer yet; this pins them against the permanent Rust probe on every target.
+        Assert.That(Native.TestBoolNegate(false), Is.True);
+        Assert.That(Native.TestBoolNegate(true), Is.False);
+    }
+
+    [Test]
+    public void GeneratedStructReturnRoundTrips()
+    {
+        // Same for the struct-by-ref parameter and struct-by-value return paths.
+        EngineConfig config = new EngineConfig { LogLevelMax = 3, LogBufferCapacity = 64, LogStderrLevelMax = 1 };
+        EngineConfig echoed = Native.TestConfigEcho(config);
+        Assert.That(echoed.LogLevelMax, Is.EqualTo(3));
+        Assert.That(echoed.LogBufferCapacity, Is.EqualTo((uint)64));
+        Assert.That(echoed.LogStderrLevelMax, Is.EqualTo(1));
     }
 }

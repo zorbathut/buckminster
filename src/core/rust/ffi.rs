@@ -15,7 +15,7 @@ pub mod meta;
 /// Marker implemented by every #[buck_struct]/#[buck_enum] type. #[buck_export] asserts it for each mirrored type in a signature, so an unmarked type fails EVERY build with a trait error, not just dump builds.
 pub trait BuckMirrored {}
 
-/// Error codes returned by every fallible buck_* export. Hand-mirrored on the C# side until the chunk-2 emitter takes over -- keep in sync with FfiCode in src/core/cs/Ffi/FfiCode.cs. Future codes append; no generic catch-all.
+/// Error codes returned by every fallible buck_* export. Future codes append; no generic catch-all.
 #[buck_enum]
 #[repr(i32)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

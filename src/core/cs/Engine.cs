@@ -46,7 +46,7 @@ public sealed class Engine : IDisposable
     // The log sink is mandatory: silent log dropping is banned and there is no principled "absent" value -- a host that truly wants to discard logs writes that decision down as a discarding delegate. Registration is process-global last-wins (logging is process-scoped; multi-engine separation is a non-goal -- which also covers the known sharp edge that a DIFFERENT live engine's sink throwing during this create's exit-drain surfaces here as CallbackError and strands the new Rust-side handle, since the out-param is unspecified on nonzero returns and cannot be destroyed).
     public static unsafe Engine Create(EngineConfig config, Action<LogLevel, string> logSink)
     {
-        FfiCall.ThrowOnError(NativeMethods.buck_engine_create(config, out ulong handle), "engine create");
+        ulong handle = Native.EngineCreate(config);
         ulong logSinkKey = CallbackTable.Register(logSink);
         try
         {
@@ -142,7 +142,7 @@ public sealed class Engine : IDisposable
             {
                 module.Tick(this, dt);
             }
-            FfiCall.ThrowOnError(NativeMethods.buck_engine_tick(handle, dt, out _), "engine tick");
+            Native.EngineTick(handle, dt);
         }
         finally
         {
@@ -176,7 +176,7 @@ public sealed class Engine : IDisposable
         try
         {
             // Destroy FIRST: its own exit-drain delivers the buffered tail -- including records logged by destroy itself -- through the still-registered log sink. A throwing sink surfaces from here, but teardown is not hostage to it: the finally clears the registration either way.
-            FfiCall.ThrowOnError(NativeMethods.buck_engine_destroy(handle), "engine destroy");
+            Native.EngineDestroy(handle);
         }
         finally
         {

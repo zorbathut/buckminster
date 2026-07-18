@@ -19,4 +19,9 @@
         <ProjectReference Include="../../usergame-demo/cs/Buckminster.Usergame.Demo.csproj" />
     </ItemGroup>
 
+    <!-- Generated/ holds build artifacts (gitignored, emitted by the build-codegen step; the per-struct layout tests live there); fail loud and instructive when the tool hasn't run, same precedent as Core's native-library and generated-bindings checks. -->
+    <Target Name="BuckCheckGenerated" BeforeTargets="AssignTargetPaths" Condition="'$(DesignTimeBuild)' != 'true'">
+        <Error Condition="!Exists('Generated/LayoutTests.g.cs')" Text="Generated test sources not found under Generated; run './tool.bat build' (the codegen step emits them) before building the .NET solution." />
+    </Target>
+
 </Project>

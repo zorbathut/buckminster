@@ -10,6 +10,7 @@ pub mod logging;
 pub mod platform;
 pub mod rid;
 
+use engine::EngineConfig;
 use ffi::{FfiCode, FfiError, buck_export, guard};
 
 /// The callback shape mirrored by C#'s `delegate* unmanaged<ulong, int, int*, int>`: userdata key in, result via out-param, FfiCode-style i32 return (nonzero means the callback failed and contained its own exception).
@@ -57,4 +58,16 @@ pub unsafe extern "C" fn buck_callback_invoke(
 #[buck_export]
 fn test_panic() -> Result<(), FfiError> {
     panic!("deliberate panic for FFI containment testing")
+}
+
+/// Permanent test-only export: negates a bool through the generated bool-as-u8 marshaling in the plain (infallible) form -- the emitter's bool paths have no production consumer yet, so this probe keeps them exercised on every target.
+#[buck_export]
+fn test_bool_negate(flag: bool) -> bool {
+    !flag
+}
+
+/// Permanent test-only export: echoes an EngineConfig, exercising the generated struct-by-ref parameter and struct-by-value return paths that have no production consumer yet.
+#[buck_export]
+fn test_config_echo(config: &EngineConfig) -> EngineConfig {
+    *config
 }

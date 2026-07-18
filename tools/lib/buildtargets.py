@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 
+from lib import ffigen
 from lib import sconsfacade
 from lib import util
 from lib import wasmnative
@@ -67,6 +68,16 @@ def _check_and_heal_m2n() -> int:
     return 1
 
 
+# FFI codegen (M5.5): dump the macro-registered metadata (the dump bin lives outside default-members and enables the ffi-dump feature in its own resolution universe), then emit the generated C#. Output is a build artifact in gitignored Generated/ dirs, regenerated every build; ffigen owns those dirs outright.
+def _build_codegen() -> int:
+    src = os.path.join(util.repo_root(), "src")
+    dump_path = os.path.join(src, "target", "ffi-dump.json")
+    code = _run_in(src, [_tool_env("BUCK_CARGO"), "run", "-p", "buckminster-ffi-dump", "--", dump_path])
+    if code != 0:
+        return code
+    return ffigen.generate(dump_path, util.repo_root())
+
+
 def _build_dotnet() -> int:
     code = _run_in(util.repo_root(), [_tool_env("BUCK_DOTNET"), "build", "Buckminster.slnx"])
     if code != 0:
@@ -77,8 +88,11 @@ def _build_dotnet() -> int:
 def define() -> None:
     rust = sconsfacade.phony("build-rust", _build_rust)
     rust_wasm = sconsfacade.phony("build-rust-wasm", _build_rust_wasm)
+    codegen = sconsfacade.phony("build-codegen", _build_codegen)
     dotnet = sconsfacade.phony("build-dotnet", _build_dotnet)
-    # dotnet copies the cargo-built native library into its output dirs and links the wasm staticlib into the wasm hosts, so both rust builds must run first (alias-member order is not an ordering contract, especially under -j).
+    # dotnet copies the cargo-built native library into its output dirs, links the wasm staticlib into the wasm hosts, and compiles the codegen output, so all three must run first (alias-member order is not an ordering contract, especially under -j). codegen-after-rust is ordering only, not a data dependency: it keeps the dump's cargo run from fighting build-rust over the target-dir lock.
+    sconsfacade.depends(codegen, rust)
     sconsfacade.depends(dotnet, rust)
     sconsfacade.depends(dotnet, rust_wasm)
-    sconsfacade.default(sconsfacade.group("build", [rust, rust_wasm, dotnet]))
+    sconsfacade.depends(dotnet, codegen)
+    sconsfacade.default(sconsfacade.group("build", [rust, rust_wasm, codegen, dotnet]))
