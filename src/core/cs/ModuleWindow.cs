@@ -85,7 +85,7 @@ public sealed class ModuleWindow : IModule
     {
         if (window.NativeRid != 0)
         {
-            FfiCall.ThrowOnError(NativeMethods.WindowSetTitle(window.NativeRid, title), "window set title");
+            Native.WindowSetTitle(window.NativeRid, title);
         }
     }
 

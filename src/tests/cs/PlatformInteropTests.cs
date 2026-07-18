@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
 using System.Text;
 using Buckminster;
 using Buckminster.Ffi;
@@ -30,17 +29,5 @@ public class PlatformInteropTests
         // And a value beyond the enum must be loudly absent, not quietly named.
         byte* probe = stackalloc byte[64];
         Assert.That(NativeMethods.buck_test_keycode_name(rustCount, probe, 64, out _), Is.EqualTo(FfiCode.InvalidArgument));
-    }
-
-    [Test]
-    public void PlatformEventLayoutMatchesRust()
-    {
-        Assert.That(NativeMethods.buck_layout_platform_event(out uint size, out uint offsetWindow, out uint offsetKind, out uint offsetData0, out uint offsetData1, out uint offsetData2), Is.EqualTo(FfiCode.Ok));
-        Assert.That((uint)Marshal.SizeOf<PlatformEventRaw>(), Is.EqualTo(size));
-        Assert.That((uint)(long)Marshal.OffsetOf<PlatformEventRaw>(nameof(PlatformEventRaw.Window)), Is.EqualTo(offsetWindow));
-        Assert.That((uint)(long)Marshal.OffsetOf<PlatformEventRaw>(nameof(PlatformEventRaw.Kind)), Is.EqualTo(offsetKind));
-        Assert.That((uint)(long)Marshal.OffsetOf<PlatformEventRaw>(nameof(PlatformEventRaw.Data0)), Is.EqualTo(offsetData0));
-        Assert.That((uint)(long)Marshal.OffsetOf<PlatformEventRaw>(nameof(PlatformEventRaw.Data1)), Is.EqualTo(offsetData1));
-        Assert.That((uint)(long)Marshal.OffsetOf<PlatformEventRaw>(nameof(PlatformEventRaw.Data2)), Is.EqualTo(offsetData2));
     }
 }

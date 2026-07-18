@@ -38,7 +38,7 @@ fn create_pump_destroy_round_trip() {
         let poll = unsafe {
             buckminster_core::platform::buck_platform_events_poll(
                 buf.as_mut_ptr(),
-                buf.len() as u32,
+                buf.len(),
                 &mut written,
                 &mut remaining,
             )

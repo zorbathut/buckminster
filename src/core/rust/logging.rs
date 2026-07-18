@@ -8,7 +8,7 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Mutex, Once};
 
-use crate::ffi::{FfiCode, FfiError};
+use crate::ffi::{FfiCode, FfiError, buck_enum, buck_export};
 
 /// The log-sink shape mirrored by C#'s `delegate* unmanaged<ulong, int, byte*, nuint, int>` (crossing the import as IntPtr, per the wasm binding constraint). The message span is valid only for the duration of the call.
 pub type LogSinkFn =
@@ -59,13 +59,25 @@ impl Drop for DrainScopeGuard {
     }
 }
 
-// The i32s crossing the FFI are the log crate's Level discriminants; LogLevel.cs mirrors them. The crate pins Error=1 in source but not as documented API -- this makes the mirror compiler-enforced.
+/// Log severity as it crosses the FFI: the log crate's Level values. 0 is reserved for "off" in the EngineConfig thresholds and never appears on a record. Exists as a Rust enum to be the generated C# mirror's source of truth; Rust code itself logs through the log crate's own Level.
+#[buck_enum(public)]
+#[repr(i32)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LogLevel {
+    Error = 1,
+    Warn = 2,
+    Info = 3,
+    Debug = 4,
+    Trace = 5,
+}
+
+// The i32s crossing the FFI are the log crate's Level discriminants; the LogLevel mirror above and the generated C# enum carry them. The crate pins Error=1 in source but not as documented API -- this makes the mirror compiler-enforced.
 const _: () = assert!(
-    log::Level::Error as i32 == 1
-        && log::Level::Warn as i32 == 2
-        && log::Level::Info as i32 == 3
-        && log::Level::Debug as i32 == 4
-        && log::Level::Trace as i32 == 5
+    log::Level::Error as i32 == LogLevel::Error as i32
+        && log::Level::Warn as i32 == LogLevel::Warn as i32
+        && log::Level::Info as i32 == LogLevel::Info as i32
+        && log::Level::Debug as i32 == LogLevel::Debug as i32
+        && log::Level::Trace as i32 == LogLevel::Trace as i32
 );
 
 // The immediate channel: fires at emit time, before buffering -- zero latency and crash-proof (the record is out before the log statement returns; a hard crash one instruction later can't lose it). stderr is today's only implementation; future channels (network error reporting, editor-over-socket) attach here. The write failure is deliberately discarded: the diagnostics channel of last resort discarding its own I/O failure is the one legitimate carve-out from the silent-error ban -- a panicking write (eprintln!) would fire per log line in a host with a dead stderr, poisoning engines from inside engine-scoped bodies.
@@ -208,44 +220,28 @@ pub extern "C" fn buck_log_sink_clear() -> i32 {
 }
 
 /// The C#-logging entry point (the `Log` facade's other half): emits through the real `log::log!` path, so C# records take exactly the pipeline Rust records do -- same buffer, same ordering, same thresholds, same channels. Also serves the pipeline tests as their deterministic injection probe.
-///
-/// # Safety
-/// `msg` must point to `msg_len` readable bytes of valid UTF-8 when `msg_len > 0` (invalid UTF-8 is rejected as an error, not UB). `msg` MAY be null when `msg_len` is 0: C#'s `fixed` on an empty array pins null, and `from_raw_parts(null, 0)` would be a non-unwinding abort that no guard can contain -- the empty case is handled without touching the pointer.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn buck_log(level: i32, msg: *const u8, msg_len: usize) -> i32 {
-    crate::ffi::guard(|| {
-        if !CONFIGURED.load(Ordering::Relaxed) {
-            // Before any engine has configured logging, even the stderr echo is dead (the global max_level defaults to Off) -- a silent-success Log.Error would be unacceptable from a facade whose point is loudness.
+#[buck_export]
+fn log(level: i32, msg: &str) -> Result<(), FfiError> {
+    if !CONFIGURED.load(Ordering::Relaxed) {
+        // Before any engine has configured logging, even the stderr echo is dead (the global max_level defaults to Off) -- a silent-success Log.Error would be unacceptable from a facade whose point is loudness.
+        return Err(FfiError::new(
+            FfiCode::InvalidArgument,
+            "logging is not configured; create an engine first (Engine.Create installs and configures the log pipeline)",
+        ));
+    }
+    let level = match level {
+        1 => log::Level::Error,
+        2 => log::Level::Warn,
+        3 => log::Level::Info,
+        4 => log::Level::Debug,
+        5 => log::Level::Trace,
+        _ => {
             return Err(FfiError::new(
                 FfiCode::InvalidArgument,
-                "logging is not configured; create an engine first (Engine.Create installs and configures the log pipeline)",
+                format!("log level must be 1 (error) through 5 (trace), got {level}"),
             ));
         }
-        let level = match level {
-            1 => log::Level::Error,
-            2 => log::Level::Warn,
-            3 => log::Level::Info,
-            4 => log::Level::Debug,
-            5 => log::Level::Trace,
-            _ => {
-                return Err(FfiError::new(
-                    FfiCode::InvalidArgument,
-                    format!("log level must be 1 (error) through 5 (trace), got {level}"),
-                ));
-            }
-        };
-        let bytes: &[u8] = if msg_len == 0 {
-            &[]
-        } else {
-            unsafe { std::slice::from_raw_parts(msg, msg_len) }
-        };
-        let text = std::str::from_utf8(bytes).map_err(|error| {
-            FfiError::new(
-                FfiCode::InvalidArgument,
-                format!("log message is not valid UTF-8: {error}"),
-            )
-        })?;
-        log::log!(level, "{text}");
-        Ok(())
-    })
+    };
+    log::log!(level, "{msg}");
+    Ok(())
 }

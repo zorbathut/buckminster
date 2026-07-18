@@ -14,7 +14,7 @@ public sealed class ModulePlatformDesktop : IModule
     public void Initialize(Engine engine)
     {
         // Fail fast: the first pump builds the event loop (and claims the thread), so a headless environment errors here at init -- loudly, at pump-to-Ready -- instead of at the first window create.
-        FfiCall.ThrowOnError(NativeMethods.buck_platform_pump(), "platform init pump");
+        Native.PlatformPump();
     }
 
     public void PumpEvents(Engine engine)
@@ -27,26 +27,21 @@ public sealed class ModulePlatformDesktop : IModule
 
     internal void Pump()
     {
-        FfiCall.ThrowOnError(NativeMethods.buck_platform_pump(), "platform pump");
+        Native.PlatformPump();
     }
 
-    internal unsafe (uint Written, uint Remaining) Poll(Span<PlatformEventRaw> buffer)
+    internal (uint Written, uint Remaining) Poll(Span<PlatformEventRaw> buffer)
     {
-        fixed (PlatformEventRaw* pointer = buffer)
-        {
-            FfiCall.ThrowOnError(NativeMethods.buck_platform_events_poll(pointer, (uint)buffer.Length, out uint written, out uint remaining), "platform events poll");
-            return (written, remaining);
-        }
+        return Native.PlatformEventsPoll(buffer);
     }
 
     internal ulong CreateNativeWindow(string title, uint width, uint height)
     {
-        FfiCall.ThrowOnError(NativeMethods.WindowCreate(title, width, height, out ulong window), "window create");
-        return window;
+        return Native.WindowCreate(title, width, height);
     }
 
     internal void DestroyNativeWindow(ulong window)
     {
-        FfiCall.ThrowOnError(NativeMethods.buck_window_destroy(window), "window destroy");
+        Native.WindowDestroy(window);
     }
 }

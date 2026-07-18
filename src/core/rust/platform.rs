@@ -6,9 +6,11 @@
 //!
 //! Error-code stance, written down deliberately: unavailability (no display server, stub target, dead loop) reports as InvalidArgument with a descriptive message rather than a dedicated code -- per errors-are-bugs, a host that wants to fall back headless PROGRAMMATICALLY needs a capability query (Godot's has_feature analog, future work), not error-code probing.
 
-use crate::ffi::{FfiCode, FfiError, guard, utf8_arg};
+use crate::ffi::{FfiCode, FfiError, buck_export, buck_struct};
+use crate::rid::Rid;
 
-/// The wire shape of one platform event -- hand-mirrored as PlatformEventRaw in C#, drift caught by buck_layout_platform_event. data0..data2 are per-kind: Resized(width, height, -); Key(keycode, key flags, modifiers); FocusChanged(0/1, -, -); CloseRequested(-, -, -). Field order is deliberate: the u64 first keeps the struct padding-free (24 bytes) -- kind-first would pad to 32.
+/// The wire shape of one platform event. data0..data2 are per-kind: Resized(width, height, -); Key(keycode, key flags, modifiers); FocusChanged(0/1, -, -); CloseRequested(-, -, -). Field order is deliberate: the u64 first keeps the struct padding-free (24 bytes) -- kind-first would pad to 32.
+#[buck_struct]
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct PlatformEventRaw {
@@ -326,7 +328,7 @@ mod native {
         })
     }
 
-    pub fn window_create(title: &str, width: u32, height: u32) -> Result<u64, FfiError> {
+    pub fn window_create(title: &str, width: u32, height: u32) -> Result<Rid, FfiError> {
         with_platform(|state| {
             let token = state.app.next_create_token;
             state.app.next_create_token += 1;
@@ -345,7 +347,7 @@ mod native {
                 .position(|(t, _)| *t == token)
             {
                 match state.app.create_results.swap_remove(index).1 {
-                    Ok(rid) => Ok(rid.raw()),
+                    Ok(rid) => Ok(rid),
                     Err(message) => Err(FfiError::new(
                         FfiCode::InvalidArgument,
                         format!("window creation failed: {message}"),
@@ -365,9 +367,8 @@ mod native {
         })
     }
 
-    pub fn window_destroy(rid_raw: u64) -> Result<(), FfiError> {
+    pub fn window_destroy(rid: Rid) -> Result<(), FfiError> {
         with_platform(|state| {
-            let rid = Rid::from_raw(rid_raw);
             match state.app.windows.remove(rid) {
                 Ok(entry) => {
                     state.app.by_winit_id.remove(&entry.window.id());
@@ -375,42 +376,47 @@ mod native {
                     drop(entry);
                     Ok(())
                 }
-                Err(why) => Err(FfiError::new(
-                    FfiCode::InvalidArgument,
-                    format!("window destroy: invalid handle {rid_raw:#x}: {why:?}"),
-                )),
+                Err(why) => {
+                    let raw = rid.raw();
+                    Err(FfiError::new(
+                        FfiCode::InvalidArgument,
+                        format!("window destroy: invalid handle {raw:#x}: {why:?}"),
+                    ))
+                }
             }
         })
     }
 
-    pub fn window_set_title(rid_raw: u64, title: &str) -> Result<(), FfiError> {
-        with_platform(
-            |state| match state.app.windows.get(Rid::from_raw(rid_raw)) {
-                Some(entry) => {
-                    entry.window.set_title(title);
-                    Ok(())
-                }
-                None => Err(FfiError::new(
+    pub fn window_set_title(rid: Rid, title: &str) -> Result<(), FfiError> {
+        with_platform(|state| match state.app.windows.get(rid) {
+            Some(entry) => {
+                entry.window.set_title(title);
+                Ok(())
+            }
+            None => {
+                let raw = rid.raw();
+                Err(FfiError::new(
                     FfiCode::InvalidArgument,
-                    format!("window set_title: invalid handle {rid_raw:#x}"),
-                )),
-            },
-        )
+                    format!("window set_title: invalid handle {raw:#x}"),
+                ))
+            }
+        })
     }
 
-    pub fn window_size(rid_raw: u64) -> Result<(u32, u32), FfiError> {
-        with_platform(
-            |state| match state.app.windows.get(Rid::from_raw(rid_raw)) {
-                Some(entry) => {
-                    let size = entry.window.inner_size();
-                    Ok((size.width, size.height))
-                }
-                None => Err(FfiError::new(
+    pub fn window_size(rid: Rid) -> Result<(u32, u32), FfiError> {
+        with_platform(|state| match state.app.windows.get(rid) {
+            Some(entry) => {
+                let size = entry.window.inner_size();
+                Ok((size.width, size.height))
+            }
+            None => {
+                let raw = rid.raw();
+                Err(FfiError::new(
                     FfiCode::InvalidArgument,
-                    format!("window size: invalid handle {rid_raw:#x}"),
-                )),
-            },
-        )
+                    format!("window size: invalid handle {raw:#x}"),
+                ))
+            }
+        })
     }
 }
 
@@ -433,198 +439,87 @@ mod native {
         Err(unavailable())
     }
 
-    pub fn window_create(_title: &str, _width: u32, _height: u32) -> Result<u64, FfiError> {
+    pub fn window_create(_title: &str, _width: u32, _height: u32) -> Result<Rid, FfiError> {
         Err(unavailable())
     }
 
-    pub fn window_destroy(_rid: u64) -> Result<(), FfiError> {
+    pub fn window_destroy(_rid: Rid) -> Result<(), FfiError> {
         Err(unavailable())
     }
 
-    pub fn window_set_title(_rid: u64, _title: &str) -> Result<(), FfiError> {
+    pub fn window_set_title(_rid: Rid, _title: &str) -> Result<(), FfiError> {
         Err(unavailable())
     }
 
-    pub fn window_size(_rid: u64) -> Result<(u32, u32), FfiError> {
+    pub fn window_size(_rid: Rid) -> Result<(u32, u32), FfiError> {
         Err(unavailable())
     }
 }
 
 /// Drives the platform event loop exactly one non-blocking pump. See the module doc for the thread-affinity contract.
-#[unsafe(no_mangle)]
-pub extern "C" fn buck_platform_pump() -> i32 {
-    guard(native::pump)
+#[buck_export]
+fn platform_pump() -> Result<(), FfiError> {
+    native::pump()
 }
 
-/// # Safety
-/// `buf` must point to `cap` writable PlatformEventRaw slots (or be anything when cap is 0); `out_written`/`out_remaining` must be non-null and writable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn buck_platform_events_poll(
-    buf: *mut PlatformEventRaw,
-    cap: u32,
-    out_written: *mut u32,
-    out_remaining: *mut u32,
-) -> i32 {
-    guard(|| {
-        let slice = if cap == 0 {
-            &mut [][..]
-        } else if buf.is_null() {
-            return Err(FfiError::new(
-                FfiCode::InvalidArgument,
-                "events poll: null buffer with nonzero capacity",
-            ));
-        } else {
-            unsafe { std::slice::from_raw_parts_mut(buf, cap as usize) }
-        };
-        let (written, remaining) = native::events_poll(slice)?;
-        unsafe {
-            *out_written = written;
-            *out_remaining = remaining;
-        }
-        Ok(())
-    })
+/// Polls buffered platform events into `buf`: returns how many were written and how many remain buffered (per-frame bulk pull; no callback ever fires from the platform layer).
+#[buck_export(ret_names(written, remaining))]
+fn platform_events_poll(buf: &mut [PlatformEventRaw]) -> Result<(u32, u32), FfiError> {
+    native::events_poll(buf)
 }
 
-/// # Safety
-/// `title_ptr`/`title_len` follow the span contract (null allowed only when len is 0); `out_window` must be non-null and writable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn buck_window_create(
-    title_ptr: *const u8,
-    title_len: usize,
-    width: u32,
-    height: u32,
-    out_window: *mut u64,
-) -> i32 {
-    guard(|| {
-        let title = unsafe { utf8_arg(title_ptr, title_len, "window create title") }?;
-        let rid = native::window_create(title, width, height)?;
-        unsafe {
-            *out_window = rid;
-        }
-        Ok(())
-    })
+/// Creates a native window and returns its handle. Creation is synchronous: the command queues into winit's about_to_wait and is flushed by an immediate pump, and a command that cannot drain (dead loop) is a loud error, never a garbage handle.
+#[buck_export(ret_names(window))]
+fn window_create(title: &str, width: u32, height: u32) -> Result<Rid, FfiError> {
+    native::window_create(title, width, height)
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn buck_window_destroy(window: u64) -> i32 {
-    guard(|| native::window_destroy(window))
+/// Destroys a native window. Cooperative close: CloseRequested is advisory, this is what actually tears down.
+#[buck_export]
+fn window_destroy(window: Rid) -> Result<(), FfiError> {
+    native::window_destroy(window)
 }
 
-/// # Safety
-/// `title_ptr`/`title_len` follow the span contract (null allowed only when len is 0).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn buck_window_set_title(
-    window: u64,
-    title_ptr: *const u8,
-    title_len: usize,
-) -> i32 {
-    guard(|| {
-        let title = unsafe { utf8_arg(title_ptr, title_len, "window title") }?;
-        native::window_set_title(window, title)
-    })
+/// Sets a native window's title.
+#[buck_export]
+fn window_set_title(window: Rid, title: &str) -> Result<(), FfiError> {
+    native::window_set_title(window, title)
 }
 
-/// # Safety
-/// `out_width`/`out_height` must be non-null and writable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn buck_window_size(
-    window: u64,
-    out_width: *mut u32,
-    out_height: *mut u32,
-) -> i32 {
-    guard(|| {
-        let (width, height) = native::window_size(window)?;
-        unsafe {
-            *out_width = width;
-            *out_height = height;
-        }
-        Ok(())
-    })
+/// Reads a native window's inner (client) size in physical pixels.
+#[buck_export(ret_names(width, height))]
+fn window_size(window: Rid) -> Result<(u32, u32), FfiError> {
+    native::window_size(window)
 }
 
-/// Layout-assertion seam for PlatformEventRaw (same pattern as buck_layout_engine_config).
-///
-/// # Safety
-/// All out-params must be non-null and writable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn buck_layout_platform_event(
-    out_size: *mut u32,
-    out_window: *mut u32,
-    out_kind: *mut u32,
-    out_data0: *mut u32,
-    out_data1: *mut u32,
-    out_data2: *mut u32,
-) -> i32 {
-    guard(|| {
-        unsafe {
-            *out_size = std::mem::size_of::<PlatformEventRaw>() as u32;
-            *out_window = std::mem::offset_of!(PlatformEventRaw, window) as u32;
-            *out_kind = std::mem::offset_of!(PlatformEventRaw, kind) as u32;
-            *out_data0 = std::mem::offset_of!(PlatformEventRaw, data0) as u32;
-            *out_data1 = std::mem::offset_of!(PlatformEventRaw, data1) as u32;
-            *out_data2 = std::mem::offset_of!(PlatformEventRaw, data2) as u32;
-        }
-        Ok(())
-    })
-}
-
-/// Exhaustive keycode-sync probe: writes the Rust-side name for `value` (InvalidArgument for values outside the enum), so the C# mirror's test can verify every member name<->value both ways plus counts. Permanent test export, buck_test_* family.
-///
-/// # Safety
-/// `buf` must point to `cap` writable bytes (or be anything when cap is 0); `out_len` must be non-null and writable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn buck_test_keycode_name(
-    value: u32,
-    buf: *mut u8,
-    cap: usize,
-    out_len: *mut usize,
-) -> i32 {
-    guard(|| {
-        let Some(code) = crate::keycode::KeyCode::from_raw(value) else {
-            return Err(FfiError::new(
-                FfiCode::InvalidArgument,
-                format!("no keycode with value {value}"),
-            ));
-        };
-        let name = code.name().as_bytes();
-        // Same span contract as events_poll (null tolerated only at cap 0), and a too-small buffer is a loud error rather than a silent truncation the caller must remember to detect.
-        if cap > 0 && buf.is_null() {
-            return Err(FfiError::new(
-                FfiCode::InvalidArgument,
-                "keycode name: null buffer with nonzero capacity",
-            ));
-        }
-        unsafe {
-            *out_len = name.len();
-        }
-        if cap < name.len() {
-            return Err(FfiError::new(
-                FfiCode::InvalidArgument,
-                format!(
-                    "keycode name: buffer too small ({cap} < {} bytes)",
-                    name.len()
-                ),
-            ));
-        }
-        unsafe {
-            std::ptr::copy_nonoverlapping(name.as_ptr(), buf, name.len());
-        }
-        Ok(())
-    })
+/// Exhaustive keycode-sync probe: writes the Rust-side name for `value` into `buf` and returns its byte length (InvalidArgument for values outside the enum, and a too-small buffer is a loud error rather than a silent truncation). Permanent test export, buck_test_* family.
+#[buck_export(ret_names(length))]
+fn test_keycode_name(value: u32, buf: &mut [u8]) -> Result<usize, FfiError> {
+    let Some(code) = crate::keycode::KeyCode::from_raw(value) else {
+        return Err(FfiError::new(
+            FfiCode::InvalidArgument,
+            format!("no keycode with value {value}"),
+        ));
+    };
+    let name = code.name().as_bytes();
+    if buf.len() < name.len() {
+        return Err(FfiError::new(
+            FfiCode::InvalidArgument,
+            format!(
+                "keycode name: buffer too small ({} < {} bytes)",
+                buf.len(),
+                name.len()
+            ),
+        ));
+    }
+    buf[..name.len()].copy_from_slice(name);
+    Ok(name.len())
 }
 
 /// The keycode count for the C# mirror's both-ways check.
-///
-/// # Safety
-/// `out_count` must be non-null and writable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn buck_test_keycode_count(out_count: *mut u32) -> i32 {
-    guard(|| {
-        unsafe {
-            *out_count = crate::keycode::KeyCode::COUNT;
-        }
-        Ok(())
-    })
+#[buck_export(ret_names(count))]
+fn test_keycode_count() -> u32 {
+    crate::keycode::KeyCode::COUNT
 }
 
 #[cfg(test)]

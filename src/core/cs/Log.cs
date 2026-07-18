@@ -40,6 +40,6 @@ public static class Log
     private static void Emit(LogLevel level, string message)
     {
         // FfiCall rethrows a throwing log sink's exception right here -- at the causal call site, which is the point of exit-drain delivery.
-        FfiCall.ThrowOnError(NativeMethods.EmitLog((int)level, message), "Log emit");
+        Native.Log((int)level, message);
     }
 }

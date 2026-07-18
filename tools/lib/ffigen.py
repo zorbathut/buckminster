@@ -89,6 +89,7 @@ class TypeRef:
     kind: str
     scalar: str = ""
     mirror_name: str = ""
+    elem: "TypeRef | None" = None
 
 
 @dataclass(frozen=True)
@@ -163,8 +164,10 @@ def _parse_type(data: dict[str, object], where: str) -> TypeRef:
         return TypeRef(kind=kind)
     if kind == "mirror":
         return TypeRef(kind=kind, mirror_name=_expect_str(data, "name", where))
-    if kind in ("slice_in", "slice_out", "ref_in_out"):
-        # The nested elem/inner is not needed until these shapes have a converted consumer (chunk 3); recording the kind is enough to reject them loudly today.
+    if kind in ("slice_in", "slice_out"):
+        return TypeRef(kind=kind, elem=_parse_type(_expect_obj(data, "elem", where), where))
+    if kind == "ref_in_out":
+        # The inner type is not needed until this shape has a converted consumer; recording the kind is enough to reject it loudly today.
         return TypeRef(kind=kind)
     raise GenError(f"{where}: unknown semantic type kind '{kind}'")
 
@@ -299,6 +302,18 @@ def _raw_scalar_cs(scalar: str, where: str) -> str:
     return _scalar_cs(scalar, where)
 
 
+def _elem_cs(elem: "TypeRef | None", mirrors: "_Mirrors", where: str) -> str:
+    if elem is None:
+        raise GenError(f"{where}: slice type is missing its element")
+    if elem.kind == "scalar":
+        if elem.scalar == "bool":
+            raise GenError(f"{where}: bool slices are outside the vocabulary")
+        return _scalar_cs(elem.scalar, where)
+    if elem.kind == "mirror":
+        return mirrors.struct(elem.mirror_name, where).name
+    raise GenError(f"{where}: unsupported slice element kind '{elem.kind}'")
+
+
 # One raw extern parameter's C# declaration, derived by zipping semantic roles onto the macro-authored raw list. The zip ASSERTS the raw name, kind, AND payload (scalar / mirror name) match what the semantic walk predicts -- a mismatch means the macro and this emitter disagree on the expansion rules, which is exactly the drift this design exists to catch.
 def _import_params(export: Export, mirrors: _Mirrors) -> list[str]:
     raw = list(export.raw_params)
@@ -326,8 +341,23 @@ def _import_params(export: Export, mirrors: _Mirrors) -> list[str]:
         elif param.ty.kind == "mirror":
             head = take(param.name, "const_ptr_mirror", expected_mirror=param.ty.mirror_name)
             declarations.append(f"in {mirrors.struct(head.mirror_name, export.symbol).name} {_camel(param.name)}")
+        elif param.ty.kind == "str":
+            take(f"{param.name}_ptr", "const_ptr_scalar", expected_scalar="u8")
+            take(f"{param.name}_len", "scalar", expected_scalar="usize")
+            declarations.append(f"byte* {_camel(param.name)}Ptr")
+            declarations.append(f"nuint {_camel(param.name)}Len")
+        elif param.ty.kind == "slice_out":
+            elem = param.ty.elem
+            elem_cs = _elem_cs(elem, mirrors, export.symbol)
+            if elem is not None and elem.kind == "mirror":
+                take(f"{param.name}_ptr", "mut_ptr_mirror", expected_mirror=elem.mirror_name)
+            else:
+                take(f"{param.name}_ptr", "mut_ptr_scalar", expected_scalar=elem.scalar if elem else "")
+            take(f"{param.name}_cap", "scalar", expected_scalar="usize")
+            declarations.append(f"{elem_cs}* {_camel(param.name)}Ptr")
+            declarations.append(f"nuint {_camel(param.name)}Cap")
         else:
-            raise GenError(f"{export.symbol}: parameter shape '{param.ty.kind}' has no converted consumer yet; its emission lands with chunk 3's conversion")
+            raise GenError(f"{export.symbol}: parameter shape '{param.ty.kind}' has no converted consumer yet; its emission lands with its first consumer")
 
     for ret in export.returns:
         if ret.ty.kind == "scalar":
@@ -340,7 +370,7 @@ def _import_params(export: Export, mirrors: _Mirrors) -> list[str]:
             head = take(f"out_{ret.name}", "mut_ptr_mirror", expected_mirror=ret.ty.mirror_name)
             declarations.append(f"out {mirrors.struct(head.mirror_name, export.symbol).name} {_out_name(head.name, export.symbol)}")
         else:
-            raise GenError(f"{export.symbol}: return shape '{ret.ty.kind}' has no converted consumer yet; its emission lands with chunk 3's conversion")
+            raise GenError(f"{export.symbol}: return shape '{ret.ty.kind}' has no converted consumer yet; its emission lands with its first consumer")
 
     if raw:
         raise GenError(f"{export.symbol}: raw signature has {len(raw)} unconsumed params starting at '{raw[0].name}' (macro/emitter derivation drift)")
@@ -348,11 +378,11 @@ def _import_params(export: Export, mirrors: _Mirrors) -> list[str]:
 
 
 def _wrapper(export: Export, mirrors: _Mirrors) -> list[str]:
-    if len(export.returns) > 1:
-        raise GenError(f"{export.symbol}: multi-value returns have no converted consumer yet; named-tuple emission lands with chunk 3's conversion")
-
     params: list[str] = []
     arguments: list[str] = []
+    # Statements before any fixed block (byte[] allocations for string marshaling), then one fixed block per pinned span/array.
+    prelude: list[str] = []
+    pins: list[tuple[str, str]] = []
     for param in export.params:
         name = _camel(param.name)
         if param.ty.kind == "scalar" and param.ty.scalar == "bool":
@@ -367,46 +397,81 @@ def _wrapper(export: Export, mirrors: _Mirrors) -> list[str]:
         elif param.ty.kind == "mirror":
             params.append(f"in {mirrors.struct(param.ty.mirror_name, export.symbol).name} {name}")
             arguments.append(f"in {name}")
+        elif param.ty.kind == "str":
+            params.append(f"string {name}")
+            prelude.append(f"byte[] {name}Bytes = Encoding.UTF8.GetBytes({name});")
+            pins.append((f"byte* {name}Ptr", f"{name}Bytes"))
+            arguments.append(f"{name}Ptr")
+            arguments.append(f"(nuint){name}Bytes.Length")
+        elif param.ty.kind == "slice_out":
+            elem_cs = _elem_cs(param.ty.elem, mirrors, export.symbol)
+            params.append(f"Span<{elem_cs}> {name}")
+            pins.append((f"{elem_cs}* {name}Ptr", name))
+            arguments.append(f"{name}Ptr")
+            arguments.append(f"(nuint){name}.Length")
         else:
-            raise GenError(f"{export.symbol}: parameter shape '{param.ty.kind}' has no converted consumer yet; its emission lands with chunk 3's conversion")
+            raise GenError(f"{export.symbol}: parameter shape '{param.ty.kind}' has no converted consumer yet; its emission lands with its first consumer")
+
+    # Returns: each becomes an out argument; the wrapper surfaces one as a return value or several as a named tuple. usize returns surface as checked int (counts feel like C# ints; the raw layer stays nuint).
+    return_types: list[str] = []
+    return_exprs: list[str] = []
+    for ret in export.returns:
+        result = _camel(ret.name)
+        if ret.ty.kind == "scalar" and ret.ty.scalar == "bool":
+            arguments.append(f"out byte {result}")
+            return_types.append("bool")
+            return_exprs.append(f"{result} != 0")
+        elif ret.ty.kind == "scalar" and ret.ty.scalar == "usize":
+            arguments.append(f"out nuint {result}")
+            return_types.append("int")
+            return_exprs.append(f"checked((int){result})")
+        elif ret.ty.kind == "scalar":
+            cs_type = _scalar_cs(ret.ty.scalar, export.symbol)
+            arguments.append(f"out {cs_type} {result}")
+            return_types.append(cs_type)
+            return_exprs.append(result)
+        elif ret.ty.kind == "rid":
+            arguments.append(f"out ulong {result}")
+            return_types.append("ulong")
+            return_exprs.append(result)
+        elif ret.ty.kind == "mirror":
+            cs_type = mirrors.struct(ret.ty.mirror_name, export.symbol).name
+            arguments.append(f"out {cs_type} {result}")
+            return_types.append(cs_type)
+            return_exprs.append(result)
+        else:
+            raise GenError(f"{export.symbol}: return shape '{ret.ty.kind}' has no converted consumer yet; its emission lands with its first consumer")
+
+    if not return_types:
+        declared_return = "void"
+        return_statement = ""
+    elif len(return_types) == 1:
+        declared_return = return_types[0]
+        return_statement = f"return {return_exprs[0]};"
+    else:
+        fields = ", ".join(f"{ty} {_pascal(ret.name)}" for ty, ret in zip(return_types, export.returns))
+        declared_return = f"({fields})"
+        return_statement = f"return ({', '.join(return_exprs)});"
 
     method = _pascal(export.name)
     visibility = "public" if export.public else "internal"
+    unsafe = "unsafe " if pins else ""
     lines = _doc_lines(export.docs, "    ")
-
-    if not export.returns:
-        lines.append(f"    {visibility} static void {method}({', '.join(params)})")
-        lines.append("    {")
-        lines.append(f"        FfiCall.ThrowOnError(NativeMethods.{export.symbol}({', '.join(arguments)}), \"{export.symbol}\");")
-        lines.append("    }")
-        return lines
-
-    ret = export.returns[0]
-    result = _camel(ret.name)
-    if ret.ty.kind == "scalar" and ret.ty.scalar == "bool":
-        cs_type = "bool"
-        out_decl = f"out byte {result}"
-        return_expr = f"{result} != 0"
-    elif ret.ty.kind == "scalar":
-        cs_type = _scalar_cs(ret.ty.scalar, export.symbol)
-        out_decl = f"out {cs_type} {result}"
-        return_expr = result
-    elif ret.ty.kind == "rid":
-        cs_type = "ulong"
-        out_decl = f"out ulong {result}"
-        return_expr = result
-    elif ret.ty.kind == "mirror":
-        cs_type = mirrors.struct(ret.ty.mirror_name, export.symbol).name
-        out_decl = f"out {cs_type} {result}"
-        return_expr = result
-    else:
-        raise GenError(f"{export.symbol}: return shape '{ret.ty.kind}' has no converted consumer yet; its emission lands with chunk 3's conversion")
-
-    arguments.append(out_decl)
-    lines.append(f"    {visibility} static {cs_type} {method}({', '.join(params)})")
+    lines.append(f"    {visibility} static {unsafe}{declared_return} {method}({', '.join(params)})")
     lines.append("    {")
-    lines.append(f"        FfiCall.ThrowOnError(NativeMethods.{export.symbol}({', '.join(arguments)}), \"{export.symbol}\");")
-    lines.append(f"        return {return_expr};")
+    indent = "        "
+    for statement in prelude:
+        lines.append(f"{indent}{statement}")
+    for declaration, pinned in pins:
+        lines.append(f"{indent}fixed ({declaration} = {pinned})")
+        lines.append(f"{indent}{{")
+        indent += "    "
+    lines.append(f"{indent}FfiCall.ThrowOnError(NativeMethods.{export.symbol}({', '.join(arguments)}), \"{export.symbol}\");")
+    if return_statement:
+        lines.append(f"{indent}{return_statement}")
+    for _ in pins:
+        indent = indent[:-4]
+        lines.append(f"{indent}}}")
     lines.append("    }")
     return lines
 
@@ -425,8 +490,10 @@ def _emit_native_methods(exports: list[Export], structs: list[Struct], mirrors: 
         if not first:
             lines.append("")
         first = False
+        declarations = _import_params(export, mirrors)
+        unsafe = "unsafe " if any("*" in declaration for declaration in declarations) else ""
         lines.append("    [LibraryImport(Library)]")
-        lines.append(f"    internal static partial FfiCode {export.symbol}({', '.join(_import_params(export, mirrors))});")
+        lines.append(f"    internal static {unsafe}partial FfiCode {export.symbol}({', '.join(declarations)});")
     for struct in structs:
         if not first:
             lines.append("")
@@ -439,6 +506,14 @@ def _emit_native_methods(exports: list[Export], structs: list[Struct], mirrors: 
 
 def _emit_native_wrappers(exports: list[Export], mirrors: _Mirrors) -> str:
     lines = [_HEADER]
+    # Usings only when a wrapper actually needs them (Span / Encoding), so simple dumps emit simple files.
+    kinds = {param.ty.kind for export in exports for param in export.params}
+    if "slice_out" in kinds:
+        lines.append("using System;")
+    if "str" in kinds:
+        lines.append("using System.Text;")
+    if kinds & {"slice_out", "str"}:
+        lines.append("")
     lines.append("namespace Buckminster.Ffi;")
     lines.append("")
     lines.append("// The generated idiomatic layer over NativeMethods: PascalCase, values in, return values out, failures as exceptions (FfiCall.ThrowOnError -- the FFI-problem channel; domain outcomes are ordinary returned data by convention).")

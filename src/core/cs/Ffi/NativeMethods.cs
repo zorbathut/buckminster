@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace Buckminster.Ffi;
 
-// The hand-written residue of the raw import layer: the fn-pointer family (inexpressible until #[buck_trait] lands), the not-yet-converted M5 platform surface, and buck_last_error_message. Everything #[buck_export]-converted lives in the generated partial (Generated/NativeMethods.g.cs). Convention unchanged: native snake_case names, FfiCode returns, out-params unspecified on a nonzero return.
+// The hand-written residue of the raw import layer: the fn-pointer family (inexpressible until #[buck_trait] lands) and buck_last_error_message. Everything #[buck_export]-converted lives in the generated partial (Generated/NativeMethods.g.cs). Convention unchanged: native snake_case names, FfiCode returns, out-params unspecified on a nonzero return.
 internal static partial class NativeMethods
 {
     private const string Library = "buckminster_core";
@@ -18,65 +18,6 @@ internal static partial class NativeMethods
 
     [LibraryImport(Library)]
     internal static partial FfiCode buck_log_sink_clear();
-
-    [LibraryImport(Library)]
-    private static unsafe partial FfiCode buck_log(int level, byte* message, nuint length);
-
-    // Friendly wrapper over the span-pair convention (native strings cross as pointer + length, never marshalled). The Log facade's other half.
-    internal static unsafe FfiCode EmitLog(int level, string message)
-    {
-        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(message);
-        fixed (byte* pointer = bytes)
-        {
-            return buck_log(level, pointer, (nuint)bytes.Length);
-        }
-    }
-
-    [LibraryImport(Library)]
-    internal static partial FfiCode buck_platform_pump();
-
-    [LibraryImport(Library)]
-    internal static unsafe partial FfiCode buck_platform_events_poll(PlatformEventRaw* buf, uint cap, out uint written, out uint remaining);
-
-    [LibraryImport(Library)]
-    private static unsafe partial FfiCode buck_window_create(byte* titlePtr, nuint titleLen, uint width, uint height, out ulong window);
-
-    // Friendly wrapper over the span-pair convention, same shape as EmitLog.
-    internal static unsafe FfiCode WindowCreate(string title, uint width, uint height, out ulong window)
-    {
-        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(title);
-        fixed (byte* pointer = bytes)
-        {
-            return buck_window_create(pointer, (nuint)bytes.Length, width, height, out window);
-        }
-    }
-
-    [LibraryImport(Library)]
-    internal static partial FfiCode buck_window_destroy(ulong window);
-
-    [LibraryImport(Library)]
-    private static unsafe partial FfiCode buck_window_set_title(ulong window, byte* titlePtr, nuint titleLen);
-
-    internal static unsafe FfiCode WindowSetTitle(ulong window, string title)
-    {
-        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(title);
-        fixed (byte* pointer = bytes)
-        {
-            return buck_window_set_title(window, pointer, (nuint)bytes.Length);
-        }
-    }
-
-    [LibraryImport(Library)]
-    internal static partial FfiCode buck_window_size(ulong window, out uint width, out uint height);
-
-    [LibraryImport(Library)]
-    internal static partial FfiCode buck_layout_platform_event(out uint size, out uint offsetWindow, out uint offsetKind, out uint offsetData0, out uint offsetData1, out uint offsetData2);
-
-    [LibraryImport(Library)]
-    internal static unsafe partial FfiCode buck_test_keycode_name(uint value, byte* buf, nuint cap, out nuint length);
-
-    [LibraryImport(Library)]
-    internal static partial FfiCode buck_test_keycode_count(out uint count);
 
     [LibraryImport(Library)]
     private static partial IntPtr buck_last_error_message();
