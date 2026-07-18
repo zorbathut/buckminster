@@ -1,6 +1,6 @@
 //! Integration tests for the #[buck_export]/#[buck_struct] expansion: each probe fn covers one shape of the type vocabulary, and the tests call the GENERATED buck_* externs the way C# will -- raw pointers, spans, codes -- proving the marshaling rails (null checks, UTF-8 validation, out-param writes, bool-as-u8) against real generated code. The pilot conversion in core covers scalars/RIDs/struct-ref in production; these cover the rest of the vocabulary so chunk 3's conversions land on proven rails.
 
-use buckminster_core::ffi::{FfiCode, FfiError, buck_export, buck_struct};
+use buckminster_core::ffi::{FfiCode, FfiError, buck_enum, buck_export, buck_struct};
 use buckminster_core::rid::Rid;
 
 #[buck_struct]
@@ -254,4 +254,65 @@ fn plain_form_returns_through_out_param() {
     let code = unsafe { buck_probe_plain_double(21, &mut out) };
     assert_eq!(code, FfiCode::Ok as i32);
     assert_eq!(out, 42);
+}
+
+#[buck_enum]
+#[repr(u32)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ProbeMode {
+    Alpha = 1,
+    Beta = 2,
+}
+
+/// Echoes an enum's discriminant (enum-by-value param: crosses as its repr, validated in the generated glue).
+#[buck_export]
+fn probe_mode_value(mode: ProbeMode) -> u32 {
+    mode as u32
+}
+
+// i32 repr with a negative discriminant: covers the signed literal branch of the generated BuckEnum match (patterns like -1i32) and i32-side runtime validation.
+#[buck_enum]
+#[repr(i32)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ProbeSigned {
+    Minus = -1,
+    Plus = 1,
+}
+
+/// Echoes a signed enum's discriminant.
+#[buck_export]
+fn probe_signed_value(mode: ProbeSigned) -> i32 {
+    mode as i32
+}
+
+#[test]
+fn signed_enum_param_validates_discriminants() {
+    let mut out = 0i32;
+    let code = unsafe { buck_probe_signed_value(-1, &mut out) };
+    assert_eq!(code, FfiCode::Ok as i32);
+    assert_eq!(out, -1);
+
+    let code = unsafe { buck_probe_signed_value(0, &mut out) };
+    assert_eq!(code, FfiCode::InvalidArgument as i32);
+    assert!(
+        last_error().contains("invalid ProbeSigned discriminant 0"),
+        "unexpected message: {}",
+        last_error()
+    );
+}
+
+#[test]
+fn enum_param_validates_discriminants() {
+    let mut out = 0u32;
+    let code = unsafe { buck_probe_mode_value(2, &mut out) };
+    assert_eq!(code, FfiCode::Ok as i32);
+    assert_eq!(out, 2);
+
+    let code = unsafe { buck_probe_mode_value(7, &mut out) };
+    assert_eq!(code, FfiCode::InvalidArgument as i32);
+    assert!(
+        last_error().contains("invalid ProbeMode discriminant 7"),
+        "unexpected message: {}",
+        last_error()
+    );
 }

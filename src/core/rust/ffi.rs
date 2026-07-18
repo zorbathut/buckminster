@@ -15,6 +15,13 @@ pub mod meta;
 /// Marker implemented by every #[buck_struct]/#[buck_enum] type. #[buck_export] asserts it for each mirrored type in a signature, so an unmarked type fails EVERY build with a trait error, not just dump builds.
 pub trait BuckMirrored {}
 
+/// Conversion contract implemented by every #[buck_enum] type: the repr scalar it crosses the FFI as, with validated construction. The export macro's enum-param glue goes through this, so an out-of-range discriminant arriving from C# is InvalidArgument -- never a transmuted invalid enum value.
+pub trait BuckEnum: Copy {
+    type Repr: Copy + std::fmt::Display;
+    fn buck_from_raw(raw: Self::Repr) -> Option<Self>;
+    fn buck_raw(self) -> Self::Repr;
+}
+
 /// Error codes returned by every fallible buck_* export. Future codes append; no generic catch-all.
 #[buck_enum]
 #[repr(i32)]

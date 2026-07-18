@@ -221,7 +221,7 @@ pub extern "C" fn buck_log_sink_clear() -> i32 {
 
 /// The C#-logging entry point (the `Log` facade's other half): emits through the real `log::log!` path, so C# records take exactly the pipeline Rust records do -- same buffer, same ordering, same thresholds, same channels. Also serves the pipeline tests as their deterministic injection probe.
 #[buck_export]
-fn log(level: i32, msg: &str) -> Result<(), FfiError> {
+fn log(level: LogLevel, msg: &str) -> Result<(), FfiError> {
     if !CONFIGURED.load(Ordering::Relaxed) {
         // Before any engine has configured logging, even the stderr echo is dead (the global max_level defaults to Off) -- a silent-success Log.Error would be unacceptable from a facade whose point is loudness.
         return Err(FfiError::new(
@@ -229,18 +229,13 @@ fn log(level: i32, msg: &str) -> Result<(), FfiError> {
             "logging is not configured; create an engine first (Engine.Create installs and configures the log pipeline)",
         ));
     }
+    // Discriminant validation happened in the generated glue; this match is the total LogLevel -> log::Level bridge.
     let level = match level {
-        1 => log::Level::Error,
-        2 => log::Level::Warn,
-        3 => log::Level::Info,
-        4 => log::Level::Debug,
-        5 => log::Level::Trace,
-        _ => {
-            return Err(FfiError::new(
-                FfiCode::InvalidArgument,
-                format!("log level must be 1 (error) through 5 (trace), got {level}"),
-            ));
-        }
+        LogLevel::Error => log::Level::Error,
+        LogLevel::Warn => log::Level::Warn,
+        LogLevel::Info => log::Level::Info,
+        LogLevel::Debug => log::Level::Debug,
+        LogLevel::Trace => log::Level::Trace,
     };
     log::log!(level, "{msg}");
     Ok(())

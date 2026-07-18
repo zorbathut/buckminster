@@ -1,6 +1,6 @@
 """The C# emitter half of FFI binding generation: consumes the buckminster-ffi-dump JSON (whose raw_params are authored by the Rust macros, never re-derived here) and emits the raw [LibraryImport] layer, idiomatic wrappers, mirrored types, and per-struct layout tests. Output is a build artifact, never checked in: the Generated/ directories are owned outright -- files this module did not emit are deleted.
 
-The type vocabulary is deliberately narrow; anything outside it is a loud GenError, never a new marshalling layer. Shapes that are in-vocabulary but have no converted consumer yet (strings, slices, ref in-out, multi-value returns) error with a pointer at the chunk that lands them, so no emitter line ships unexercised."""
+The type vocabulary is deliberately narrow; anything outside it is a loud GenError, never a new marshalling layer. Shapes that are in-vocabulary but have no converted consumer yet (slice-in, ref in-out) error with a pointer at their first consumer, so no emitter line ships unexercised."""
 
 import json
 import os
@@ -176,7 +176,7 @@ def _parse_raw_type(data: dict[str, object], where: str) -> tuple[str, str, str]
     kind = _expect_str(data, "kind", where)
     if kind in ("scalar", "const_ptr_scalar", "mut_ptr_scalar"):
         return (kind, _expect_str(data, "scalar", where), "")
-    if kind in ("const_ptr_mirror", "mut_ptr_mirror"):
+    if kind in ("const_ptr_mirror", "mut_ptr_mirror", "enum_repr"):
         return (kind, "", _expect_str(data, "name", where))
     raise GenError(f"{where}: unknown raw type kind '{kind}'")
 
@@ -283,6 +283,15 @@ class _Mirrors:
             raise GenError(f"{where}: mirror '{name}' is not a generated struct (drifted dump?)")
         return found
 
+    def is_enum(self, name: str) -> bool:
+        return name in self.enums
+
+    def enum_(self, name: str, where: str) -> Enum:
+        found = self.enums.get(name)
+        if found is None:
+            raise GenError(f"{where}: mirror '{name}' is not a generated enum (drifted dump?)")
+        return found
+
 
 def _scalar_cs(scalar: str, where: str) -> str:
     found = _SCALAR_CS.get(scalar)
@@ -338,6 +347,9 @@ def _import_params(export: Export, mirrors: _Mirrors) -> list[str]:
         elif param.ty.kind == "rid":
             take(param.name, "scalar", expected_scalar="u64")
             declarations.append(f"ulong {_camel(param.name)}")
+        elif param.ty.kind == "mirror" and mirrors.is_enum(param.ty.mirror_name):
+            take(param.name, "enum_repr", expected_mirror=param.ty.mirror_name)
+            declarations.append(f"{mirrors.enum_(param.ty.mirror_name, export.symbol).name} {_camel(param.name)}")
         elif param.ty.kind == "mirror":
             head = take(param.name, "const_ptr_mirror", expected_mirror=param.ty.mirror_name)
             declarations.append(f"in {mirrors.struct(head.mirror_name, export.symbol).name} {_camel(param.name)}")
@@ -393,6 +405,9 @@ def _wrapper(export: Export, mirrors: _Mirrors) -> list[str]:
             arguments.append(name)
         elif param.ty.kind == "rid":
             params.append(f"ulong {name}")
+            arguments.append(name)
+        elif param.ty.kind == "mirror" and mirrors.is_enum(param.ty.mirror_name):
+            params.append(f"{mirrors.enum_(param.ty.mirror_name, export.symbol).name} {name}")
             arguments.append(name)
         elif param.ty.kind == "mirror":
             params.append(f"in {mirrors.struct(param.ty.mirror_name, export.symbol).name} {name}")

@@ -125,6 +125,31 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                 preludes.push(quote!(let #name = ::buckminster_core::rid::Rid::from_raw(#name);));
                 meta_params.push(quote!(::buckminster_core::ffi::meta::MetaParam { name: #name_string, ty: ::buckminster_core::ffi::meta::MetaType::Rid }));
             }
+            ParamKind::EnumVal(path) => {
+                let enum_name = path
+                    .segments
+                    .last()
+                    .expect("a type path has at least one segment")
+                    .ident
+                    .to_string();
+                let message_prefix =
+                    format!("{symbol_str}: {name_string}: invalid {enum_name} discriminant");
+                raw_params.push(RawParam {
+                    decl: quote!(#name: <#path as ::buckminster_core::ffi::BuckEnum>::Repr),
+                    meta: quote!(::buckminster_core::ffi::meta::MetaRawParam { name: #name_string, ty: ::buckminster_core::ffi::meta::MetaRawType::EnumRepr { crate_name: <#path as ::buckminster_core::ffi::meta::BuckMirror>::CRATE, name: <#path as ::buckminster_core::ffi::meta::BuckMirror>::NAME } }),
+                    is_pointer: false,
+                });
+                preludes.push(quote! {
+                    let #name = match <#path as ::buckminster_core::ffi::BuckEnum>::buck_from_raw(#name) {
+                        Some(value) => value,
+                        None => {
+                            return Err(::buckminster_core::ffi::FfiError::new(::buckminster_core::ffi::FfiCode::InvalidArgument, format!("{} {}", #message_prefix, #name)));
+                        }
+                    };
+                });
+                assertions.push(shared::mirror_assertion(path));
+                meta_params.push(quote!(::buckminster_core::ffi::meta::MetaParam { name: #name_string, ty: ::buckminster_core::ffi::meta::MetaType::Mirror { crate_name: <#path as ::buckminster_core::ffi::meta::BuckMirror>::CRATE, name: <#path as ::buckminster_core::ffi::meta::BuckMirror>::NAME } }));
+            }
             ParamKind::Str => {
                 let ptr = format_ident!("{}_ptr", name);
                 let len = format_ident!("{}_len", name);
@@ -678,6 +703,41 @@ mod tests {
         assert!(
             !expansion.contains("probe (a) ? ;"),
             "plain body call, no ?: {expansion}"
+        );
+    }
+
+    #[test]
+    fn enum_params_cross_as_repr_with_validated_glue() {
+        let expansion = expand_string(
+            TokenStream::new(),
+            quote! {
+                fn probe(mode: LogLevel) -> Result<(), FfiError> {
+                    let _ = mode;
+                    Ok(())
+                }
+            },
+        );
+        assert!(
+            expansion
+                .contains("mode : < LogLevel as :: buckminster_core :: ffi :: BuckEnum > :: Repr"),
+            "raw decl is the repr projection: {expansion}"
+        );
+        assert!(
+            expansion.contains("buck_from_raw (mode)"),
+            "validated construction glue: {expansion}"
+        );
+        assert!(
+            expansion.contains("invalid LogLevel discriminant"),
+            "loud out-of-range message: {expansion}"
+        );
+        let (semantic, raw) = split_semantic_raw(&expansion);
+        assert!(
+            raw.contains("EnumRepr"),
+            "raw metadata records the enum identity: {raw}"
+        );
+        assert!(
+            semantic.contains("MetaType :: Mirror"),
+            "semantic metadata: {semantic}"
         );
     }
 

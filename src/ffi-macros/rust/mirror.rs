@@ -165,6 +165,8 @@ pub fn expand_enum(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStr
 
     let name = item.ident.clone();
     let name_str = name.to_string();
+    let repr_ty = repr.raw_tokens();
+    let mut from_raw_arms: Vec<TokenStream> = Vec::new();
     let mut meta_variants: Vec<TokenStream> = Vec::new();
     for variant in &item.variants {
         if !matches!(variant.fields, Fields::Unit) {
@@ -181,7 +183,15 @@ pub fn expand_enum(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStr
         };
         let value = shared::discriminant_value(discriminant)?;
         let variant_name = variant.ident.to_string();
+        let variant_ident = variant.ident.clone();
         let variant_docs = shared::docs_tokens(&shared::doc_lines(&variant.attrs));
+        // The literal needs the repr's own type or the match arms won't typecheck against Repr.
+        let value_literal = match repr {
+            Scalar::I32 => proc_macro2::Literal::i32_suffixed(value as i32),
+            Scalar::U32 => proc_macro2::Literal::u32_suffixed(value as u32),
+            _ => unreachable!("enum reprs are validated to i32/u32 above"),
+        };
+        from_raw_arms.push(quote!(#value_literal => Some(#name::#variant_ident),));
         meta_variants.push(quote!(::buckminster_core::ffi::meta::MetaVariant { name: #variant_name, value: #value, docs: #variant_docs }));
     }
 
@@ -192,6 +202,21 @@ pub fn expand_enum(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStr
         #item
 
         impl ::buckminster_core::ffi::BuckMirrored for #name {}
+
+        impl ::buckminster_core::ffi::BuckEnum for #name {
+            type Repr = #repr_ty;
+
+            fn buck_from_raw(raw: #repr_ty) -> Option<#name> {
+                match raw {
+                    #(#from_raw_arms)*
+                    _ => None,
+                }
+            }
+
+            fn buck_raw(self) -> #repr_ty {
+                self as #repr_ty
+            }
+        }
 
         #[cfg(feature = "ffi-dump")]
         impl ::buckminster_core::ffi::meta::BuckMirror for #name {

@@ -162,6 +162,7 @@ impl Elem {
 pub enum ParamKind {
     Scalar(Scalar),
     Rid,
+    EnumVal(syn::Path),
     Str,
     SliceIn(Elem),
     SliceOut(Elem),
@@ -178,10 +179,8 @@ pub fn classify_param(ty: &Type) -> syn::Result<ParamKind> {
         return Ok(ParamKind::Rid);
     }
     match ty {
-        Type::Path(_) => Err(syn::Error::new_spanned(
-            ty,
-            "unsupported parameter type: mirrored structs pass by reference (&T); bare path types must be scalars or Rid",
-        )),
+        // A bare non-scalar path is an enum-by-value: structs pass by reference, so this is the only thing a bare mirror can mean. A struct written bare fails on the BuckEnum bound -- loud, if less prosaic than a macro message could be (syntax alone cannot tell the two apart).
+        Type::Path(path) => Ok(ParamKind::EnumVal(path.path.clone())),
         Type::Reference(reference) => {
             let mutable = reference.mutability.is_some();
             match &*reference.elem {
@@ -238,13 +237,13 @@ pub fn classify_param(ty: &Type) -> syn::Result<ParamKind> {
                 }
                 _ => Err(syn::Error::new_spanned(
                     ty,
-                    "unsupported reference parameter type: the FFI vocabulary is &str, &[T], &mut [T], &Struct, and &mut T",
+                    "unsupported reference parameter type: the FFI vocabulary is &str, &[T], &mut [T], &Struct, and &mut T (enums and scalars pass by value)",
                 )),
             }
         }
         _ => Err(syn::Error::new_spanned(
             ty,
-            "unsupported parameter type: the FFI vocabulary is scalars, &str, &[T], &mut [T], &Struct, and &mut T",
+            "unsupported parameter type: the FFI vocabulary is scalars, Rid, enums, &str, &[T], &mut [T], &Struct, and &mut T",
         )),
     }
 }

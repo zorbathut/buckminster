@@ -75,6 +75,11 @@ pub enum MetaRawType {
         crate_name: &'static str,
         name: &'static str,
     },
+    /// An enum crossing by value as its repr scalar; the emitter resolves the repr from the enums section.
+    EnumRepr {
+        crate_name: &'static str,
+        name: &'static str,
+    },
 }
 
 #[derive(Serialize, Debug)]

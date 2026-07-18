@@ -1,5 +1,21 @@
-error: unsupported parameter type: mirrored structs pass by reference (&T); bare path types must be scalars or Rid
-  --> tests/compile_fail/export_struct_by_value.rs:10:18
+error[E0433]: cannot find `buckminster_core` in the crate root
+  --> tests/compile_fail/export_struct_by_value.rs:10:1
    |
-10 | fn probe(config: Config) -> Result<i32, MyErr> {
-   |                  ^^^^^^
+10 | #[buck_export]
+   | ^^^^^^^^^^^^^^ could not find `buckminster_core` in the list of imported crates
+   |
+   = note: this error originates in the attribute macro `buck_export` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition value: `ffi-dump`
+  --> tests/compile_fail/export_struct_by_value.rs:10:1
+   |
+10 | #[buck_export]
+   | ^^^^^^^^^^^^^^
+   |
+   = note: no expected values for `feature`
+   = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+   = help: try referring to `buck_export` crate for guidance on how handle this unexpected cfg
+   = help: the attribute macro `buck_export` may come from an old version of the `buckminster_ffi_macros` crate, try updating your dependency with `cargo update -p buckminster_ffi_macros`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+   = note: `#[warn(unexpected_cfgs)]` on by default
+   = note: this warning originates in the attribute macro `buck_export` (in Nightly builds, run with -Z macro-backtrace for more info)
