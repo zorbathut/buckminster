@@ -291,4 +291,26 @@ public class LogPipelineTests
         Assert.Throws<InvalidOperationException>(() => CreateEngine((level, message) => { }, levelMax: -1));
         Assert.Throws<InvalidOperationException>(() => Engine.Create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 9 }, (level, message) => { }));
     }
+
+    // A deliberately-discarding sink: silent log dropping is banned as a DEFAULT, and writing the discard down as an implementation is the sanctioned form.
+    private sealed class SinkNull : ILogSink
+    {
+        public void Write(LogLevel level, string msg)
+        {
+        }
+    }
+
+    [Test]
+    public void SinkReplacementReleasesTheSupersededRegistration()
+    {
+        // The no-manual-bookkeeping lifetime claim, pinned: every transition (set-over-set, clear) must release exactly the superseded key via the Rust proxy's drop firing the release thunk.
+        LogSinkVtable first = LogSinkThunks.Create(new SinkNull());
+        Native.LogSinkSet(in first);
+        LogSinkVtable second = LogSinkThunks.Create(new SinkNull());
+        Native.LogSinkSet(in second);
+        Assert.That(() => CallbackTable.Get(first.Userdata), Throws.TypeOf<System.Collections.Generic.KeyNotFoundException>());
+        Assert.That(CallbackTable.Get(second.Userdata), Is.Not.Null);
+        Native.LogSinkClear();
+        Assert.That(() => CallbackTable.Get(second.Userdata), Throws.TypeOf<System.Collections.Generic.KeyNotFoundException>());
+    }
 }

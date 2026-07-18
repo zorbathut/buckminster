@@ -1,0 +1,5 @@
+error: #[buck_trait] methods must return Result<T, FfiError>: the i32 code is the C# exception channel, and a plain form would have nowhere to surface it
+ --> tests/compile_fail/trait_non_result_method.rs:5:36
+  |
+5 |     fn poke(&mut self, value: i32) -> i32;
+  |                                    ^^^^^^

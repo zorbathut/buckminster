@@ -1,0 +1,5 @@
+error: Probe::poke: this parameter shape has no trait-method consumer yet; it lands with its first consumer (trait vocabulary today: scalars, enums, &str)
+ --> tests/compile_fail/trait_unsupported_param.rs:7:29
+  |
+7 |     fn poke(&mut self, buf: &mut [u8]) -> Result<(), MyErr>;
+  |                             ^^^^^^^^^

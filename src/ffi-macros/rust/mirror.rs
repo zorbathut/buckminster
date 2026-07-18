@@ -18,8 +18,8 @@ fn pascal_to_snake(name: &str) -> String {
     snake
 }
 
-/// The layout-assertion seam, one export per mirrored struct: writes [size, offset per field] into the caller's buffer and demands the EXACT slot count, so a field-count drift between the two generated sides is loud instead of silently truncated.
-fn layout_export(struct_name: &Ident, field_names: &[Ident]) -> TokenStream {
+/// The layout-assertion seam, one export per mirrored struct (and per #[buck_trait] vtable): writes [size, offset per field] into the caller's buffer and demands the EXACT slot count, so a field-count drift between the two generated sides is loud instead of silently truncated.
+pub fn layout_export(struct_name: &Ident, field_names: &[Ident]) -> TokenStream {
     let symbol = format_ident!("buck_layout_{}", pascal_to_snake(&struct_name.to_string()));
     let symbol_str = symbol.to_string();
     let expected = field_names.len() + 1;

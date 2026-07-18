@@ -5,7 +5,7 @@ use std::ffi::{CString, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 // Re-exported so exporting code imports the attribute macros and the rails from one place (`use crate::ffi::{buck_export, guard, ...}`).
-pub use buckminster_ffi_macros::{buck_enum, buck_export, buck_struct};
+pub use buckminster_ffi_macros::{buck_enum, buck_export, buck_struct, buck_trait};
 
 #[cfg(feature = "ffi-dump")]
 pub use inventory;

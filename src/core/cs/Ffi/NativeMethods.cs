@@ -3,21 +3,10 @@ using System.Runtime.InteropServices;
 
 namespace Buckminster.Ffi;
 
-// The hand-written residue of the raw import layer: the fn-pointer family (inexpressible until #[buck_trait] lands) and buck_last_error_message. Everything #[buck_export]-converted lives in the generated partial (Generated/NativeMethods.g.cs). Convention unchanged: native snake_case names, FfiCode returns, out-params unspecified on a nonzero return.
+// The hand-written residue of the raw import layer: exactly buck_last_error_message (deliberately guard-less -- see the Rust side) plus the Library constant the generated partial shares. Everything #[buck_export]-converted lives in the generated partial (Generated/NativeMethods.g.cs). Convention unchanged: native snake_case names, FfiCode returns, out-params unspecified on a nonzero return.
 internal static partial class NativeMethods
 {
     private const string Library = "buckminster_core";
-
-    // The callback crosses as IntPtr, not delegate* unmanaged<ulong, int, int*, int>: mono's wasm interp-to-native path cannot map function-pointer parameter types (type_to_c in aot-runtime-wasm.c aborts on them -- the dotnet/runtime #56145 class), and the two representations are ABI-identical. Call sites cast through the full delegate type -- (IntPtr)(delegate* unmanaged<ulong, int, int*, int>)&TheCallback -- deliberately: that re-asserts the callback signature at every call site, so a signature drift is a compile error instead of a runtime trap.
-    [LibraryImport(Library)]
-    internal static partial FfiCode buck_callback_invoke(IntPtr callback, ulong userdata, int value, out int result);
-
-    // The log sink crosses as IntPtr (the standing wasm binding constraint); call sites cast through delegate* unmanaged<ulong, int, byte*, nuint, int>.
-    [LibraryImport(Library)]
-    internal static partial FfiCode buck_log_sink_set(IntPtr logSink, ulong userdata);
-
-    [LibraryImport(Library)]
-    internal static partial FfiCode buck_log_sink_clear();
 
     [LibraryImport(Library)]
     private static partial IntPtr buck_last_error_message();

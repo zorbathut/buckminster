@@ -8,11 +8,14 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Mutex, Once};
 
-use crate::ffi::{FfiCode, FfiError, buck_enum, buck_export};
+use crate::ffi::{BuckEnum, FfiCode, FfiError, buck_enum, buck_export, buck_trait};
 
-/// The log-sink shape mirrored by C#'s `delegate* unmanaged<ulong, int, byte*, nuint, int>` (crossing the import as IntPtr, per the wasm binding constraint). The message span is valid only for the duration of the call.
-pub type LogSinkFn =
-    extern "C" fn(userdata: u64, level: i32, msg: *const u8, msg_len: usize) -> i32;
+/// The delivery target for buffered log records: C# implements the generated ILogSink (Engine.Create registers one over its sink delegate); the exit-drain invokes it at the tail of every buck_* call. The message span behind the write is valid only for the duration of the call.
+#[buck_trait]
+pub trait LogSink {
+    /// Delivers one record. A failure (a throwing C# sink) surfaces as CallbackError from the call whose exit-drain was delivering. Do NOT replace or clear the sink from inside Write: the drain invokes through a vtable copied before delivery, so the superseded registration dies mid-drain and the remaining records of that drain fail loudly against the dead key.
+    fn write(&mut self, level: LogLevel, msg: &str) -> Result<(), FfiError>;
+}
 
 struct LogBuffer {
     records: VecDeque<(i32, String)>,
@@ -23,7 +26,7 @@ static BUFFER: Mutex<LogBuffer> = Mutex::new(LogBuffer {
     records: VecDeque::new(),
     dropped: 0,
 });
-static LOG_SINK: Mutex<Option<(LogSinkFn, u64)>> = Mutex::new(None);
+static LOG_SINK: Mutex<Option<LogSinkProxy>> = Mutex::new(None);
 // Per-channel thresholds and capacity, read on every log statement, written by every engine create (last-wins). Two independent thresholds: the log crate's single global max_level is set to the max of both, and each channel filters itself here -- otherwise configuring {buffer: Error, stderr: Trace} would silently cap stderr at Error.
 static LEVEL_BUFFER: AtomicI32 = AtomicI32::new(0);
 static LEVEL_STDERR: AtomicI32 = AtomicI32::new(0);
@@ -164,7 +167,13 @@ pub fn drain_at_exit() -> Result<(), FfiError> {
     let Some(_scope) = DrainScopeGuard::enter() else {
         return Ok(());
     };
-    let Some((log_sink, userdata)) = *LOG_SINK.lock().expect("log sink mutex poisoned") else {
+    // Copy the vtable out and invoke through it (the trait is implemented for the vtable itself): the owning proxy stays in the mutex, and no lock is held across the sink call (callback rule 4 -- a sink reentering buck_log_sink_set would otherwise deadlock).
+    let Some(mut sink) = LOG_SINK
+        .lock()
+        .expect("log sink mutex poisoned")
+        .as_ref()
+        .map(LogSinkProxy::vtable)
+    else {
         return Ok(());
     };
     let (mut records, dropped) = {
@@ -181,16 +190,14 @@ pub fn drain_at_exit() -> Result<(), FfiError> {
     }
     let mut drop_report_pending = dropped > 0;
     while let Some((level, message)) = records.pop_front() {
-        let code = log_sink(userdata, level, message.as_ptr(), message.len());
-        if code != 0 {
+        let level =
+            LogLevel::buck_from_raw(level).expect("buffered levels are log crate discriminants");
+        if let Err(error) = sink.write(level, &message) {
             let mut buffer = BUFFER.lock().expect("log buffer mutex poisoned");
             while let Some(record) = records.pop_back() {
                 buffer.records.push_front(record);
             }
-            return Err(FfiError::new(
-                FfiCode::CallbackError,
-                format!("log sink returned error code {code}"),
-            ));
+            return Err(error);
         }
         if drop_report_pending {
             // The report landed; clear exactly what it reported (drops accrued during this drain keep accumulating for the next one).
@@ -201,22 +208,25 @@ pub fn drain_at_exit() -> Result<(), FfiError> {
     Ok(())
 }
 
-/// Registers the process-wide log sink (last-wins, like all logging config). Clearing is a separate export because a null fn pointer is not an expressible LogSinkFn.
-#[unsafe(no_mangle)]
-pub extern "C" fn buck_log_sink_set(log_sink: LogSinkFn, userdata: u64) -> i32 {
-    crate::ffi::guard(|| {
-        *LOG_SINK.lock().expect("log sink mutex poisoned") = Some((log_sink, userdata));
-        Ok(())
-    })
+/// Registers the process-wide log sink (last-wins, like all logging config): takes ownership of the vtable, so replacing or clearing releases the previous registration deterministically. Clearing is a separate export because there is no null vtable.
+#[buck_export]
+fn log_sink_set(sink: &LogSinkVtable) -> Result<(), FfiError> {
+    // mem::replace, not plain assignment: assigning would drop the superseded proxy INSIDE the MutexGuard's scope, firing its release thunk (a C# callback) while Rust holds the lock -- callback rule 4. The old proxy must drop after the guard is gone.
+    let superseded = std::mem::replace(
+        &mut *LOG_SINK.lock().expect("log sink mutex poisoned"),
+        Some(LogSinkProxy::from_vtable(*sink)),
+    );
+    drop(superseded);
+    Ok(())
 }
 
-/// Clears the log sink registration. This call's own exit-drain sees no sink and delivers nothing -- the last delivery point was the preceding call's exit; a stranded pushback tail stays buffered (stderr already carried it) until a new registration.
-#[unsafe(no_mangle)]
-pub extern "C" fn buck_log_sink_clear() -> i32 {
-    crate::ffi::guard(|| {
-        *LOG_SINK.lock().expect("log sink mutex poisoned") = None;
-        Ok(())
-    })
+/// Clears the log sink registration (dropping the proxy releases the C#-side registration). This call's own exit-drain sees no sink and delivers nothing -- the last delivery point was the preceding call's exit; a stranded pushback tail stays buffered (stderr already carried it) until a new registration.
+#[buck_export]
+fn log_sink_clear() -> Result<(), FfiError> {
+    // take() for the same rule-4 reason as log_sink_set: the proxy's release thunk must fire after the lock is released, not during the assignment.
+    let removed = LOG_SINK.lock().expect("log sink mutex poisoned").take();
+    drop(removed);
+    Ok(())
 }
 
 /// The C#-logging entry point (the `Log` facade's other half): emits through the real `log::log!` path, so C# records take exactly the pipeline Rust records do -- same buffer, same ordering, same thresholds, same channels. Also serves the pipeline tests as their deterministic injection probe.

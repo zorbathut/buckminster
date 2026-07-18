@@ -11,12 +11,9 @@ pub mod platform;
 pub mod rid;
 
 use engine::EngineConfig;
-use ffi::{FfiCode, FfiError, buck_export, guard};
+use ffi::{FfiCode, FfiError, buck_export, buck_trait};
 
-/// The callback shape mirrored by C#'s `delegate* unmanaged<ulong, int, int*, int>`: userdata key in, result via out-param, FfiCode-style i32 return (nonzero means the callback failed and contained its own exception).
-pub type CallbackFn = extern "C" fn(userdata: u64, value: i32, out_result: *mut i32) -> i32;
-
-// Export conventions (see ARCHITECTURE.md, FFI section): fallible exports return an i32 FfiCode and write results through out-params; out-params are non-null by caller contract, which is why exports with out-params are `unsafe fn` (clippy::not_unsafe_ptr_arg_deref agrees). Every body runs inside ffi::guard. #[buck_export] mechanizes all of this; the remaining hand-written externs are the fn-pointer family, inexpressible until #[buck_trait] lands.
+// Export conventions (see ARCHITECTURE.md, FFI section): fallible exports return an i32 FfiCode and write results through out-params; out-params are non-null by caller contract. #[buck_export] mechanizes all of this; buck_last_error_message (ffi.rs) is the one deliberate hand-written exception.
 
 /// Adds two i32s, erroring on overflow -- the M1 walking-skeleton demonstrator.
 #[buck_export(ret_names(sum))]
@@ -29,29 +26,18 @@ fn add(a: i32, b: i32) -> Result<i32, FfiError> {
     })
 }
 
-/// # Safety
-/// `out_result` must be non-null and writable (the standard out-param contract).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn buck_callback_invoke(
-    callback: CallbackFn,
-    userdata: u64,
-    value: i32,
-    out_result: *mut i32,
-) -> i32 {
-    guard(|| {
-        let mut result = 0;
-        let callback_code = callback(userdata, value, &mut result);
-        if callback_code != 0 {
-            return Err(FfiError::new(
-                FfiCode::CallbackError,
-                format!("callback returned error code {callback_code}"),
-            ));
-        }
-        unsafe {
-            *out_result = result;
-        }
-        Ok(())
-    })
+/// Permanent test-only trait: the callback-machinery demonstrator (M1's buck_callback_invoke, generalized). Its C# test implementations do arithmetic, throw, and reenter the FFI, pinning the full round trip on every target.
+#[buck_trait]
+pub trait CallbackDemo {
+    /// Transforms a value however the implementation likes.
+    fn invoke(&mut self, value: i32) -> Result<i32, FfiError>;
+}
+
+/// Permanent test-only export: proxies one CallbackDemo invocation, taking ownership of the vtable -- the drop at return releases the C#-side registration, so the test also pins the deterministic-lifetime half of the contract.
+#[buck_export(ret_names(result))]
+fn test_callback_demo(callback: &CallbackDemoVtable, value: i32) -> Result<i32, FfiError> {
+    let mut proxy = CallbackDemoProxy::from_vtable(*callback);
+    proxy.invoke(value)
 }
 
 /// Permanent test-only export: proves panic containment against the shipped artifact (feature-gating it would mean tests run against a different .so than the build produced).

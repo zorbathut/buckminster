@@ -141,6 +141,23 @@ class Struct:
 
 
 @dataclass(frozen=True)
+class Method:
+    name: str
+    docs: tuple[str, ...]
+    params: tuple[Param, ...]
+    returns: tuple[Ret, ...]
+    raw_params: tuple[RawParam, ...]
+
+
+@dataclass(frozen=True)
+class Trait:
+    name: str
+    docs: tuple[str, ...]
+    vtable: str
+    methods: tuple[Method, ...]
+
+
+@dataclass(frozen=True)
 class Variant:
     name: str
     value: int
@@ -160,7 +177,7 @@ def _parse_type(data: dict[str, object], where: str) -> TypeRef:
     kind = _expect_str(data, "kind", where)
     if kind == "scalar":
         return TypeRef(kind=kind, scalar=_expect_str(data, "scalar", where))
-    if kind in ("str", "rid"):
+    if kind in ("str", "rid", "fn_ptr"):
         return TypeRef(kind=kind)
     if kind == "mirror":
         return TypeRef(kind=kind, mirror_name=_expect_str(data, "name", where))
@@ -188,7 +205,7 @@ def _check_crate(data: dict[str, object], where: str) -> None:
         raise GenError(f"{where}: crate '{crate}' has no output mapping; teach ffigen the crate->directory mapping before adding exporting crates")
 
 
-def _parse_dump(dump_path: str) -> tuple[list[Export], list[Struct], list[Enum]]:
+def _parse_dump(dump_path: str) -> tuple[list[Export], list[Struct], list[Enum], list[Trait]]:
     with open(dump_path, encoding="utf-8") as handle:
         parsed: object = json.load(handle)
     if not isinstance(parsed, dict):
@@ -235,7 +252,27 @@ def _parse_dump(dump_path: str) -> tuple[list[Export], list[Struct], list[Enum]]
         variants = tuple(Variant(name=_expect_str(v, "name", name), value=_expect_int(v, "value", name), docs=_expect_str_list(v, "docs", name)) for v in _expect_list(data, "variants", name))
         enums.append(Enum(name=name, docs=_expect_str_list(data, "docs", name), public=_expect_bool(data, "public", name), repr_scalar=_expect_str(data, "repr", name), variants=variants))
 
-    return exports, structs, enums
+    traits: list[Trait] = []
+    for data in _expect_list(root, "traits", "dump"):
+        name = _expect_str(data, "name", "trait")
+        _check_crate(data, name)
+        methods: list[Method] = []
+        for entry in _expect_list(data, "methods", name):
+            method_name = f"{name}.{_expect_str(entry, 'name', name)}"
+            method_params: list[Param] = []
+            for param in _expect_list(entry, "params", method_name):
+                method_params.append(Param(name=_expect_str(param, "name", method_name), ty=_parse_type(_expect_obj(param, "ty", method_name), method_name)))
+            method_returns: list[Ret] = []
+            for ret in _expect_list(entry, "returns", method_name):
+                method_returns.append(Ret(name=_expect_str(ret, "name", method_name), ty=_parse_type(_expect_obj(ret, "ty", method_name), method_name)))
+            method_raws: list[RawParam] = []
+            for raw in _expect_list(entry, "raw_params", method_name):
+                kind, scalar, mirror = _parse_raw_type(_expect_obj(raw, "ty", method_name), method_name)
+                method_raws.append(RawParam(name=_expect_str(raw, "name", method_name), kind=kind, scalar=scalar, mirror_name=mirror))
+            methods.append(Method(name=_expect_str(entry, "name", name), docs=_expect_str_list(entry, "docs", method_name), params=tuple(method_params), returns=tuple(method_returns), raw_params=tuple(method_raws)))
+        traits.append(Trait(name=name, docs=_expect_str_list(data, "docs", name), vtable=_expect_str(data, "vtable", name), methods=tuple(methods)))
+
+    return exports, structs, enums, traits
 
 
 def _pascal(snake: str) -> str:
@@ -559,6 +596,9 @@ def _field_cs_type(field: Field, struct: Struct, mirrors: _Mirrors) -> str:
         if field.ty.scalar == "bool":
             raise GenError(f"{struct.name}.{field.name}: bool fields are outside the vocabulary")
         return _scalar_cs(field.ty.scalar, struct.name)
+    if field.ty.kind == "fn_ptr":
+        # #[buck_trait] vtable fields: fn pointers cross as IntPtr (the standing wasm binding constraint).
+        return "IntPtr"
     if field.ty.kind == "mirror":
         raise GenError(f"{struct.name}.{field.name}: mirrored-struct fields have no converted consumer yet; their emission lands with their first consumer")
     raise GenError(f"{struct.name}.{field.name}: unsupported field type kind '{field.ty.kind}'")
@@ -568,6 +608,8 @@ def _emit_struct(struct: Struct, mirrors: _Mirrors) -> str:
     namespace = "Buckminster" if struct.public else "Buckminster.Ffi"
     visibility = "public" if struct.public else "internal"
     lines = [_HEADER]
+    if any(field.ty.kind == "fn_ptr" for field in struct.fields):
+        lines.append("using System;")
     lines.append("using System.Runtime.InteropServices;")
     lines.append("")
     lines.append(f"namespace {namespace};")
@@ -653,6 +695,177 @@ def _add_file(files: dict[str, str], name: str, content: str) -> None:
     files[name] = content
 
 
+# The same role-zip discipline as _import_params, for a trait method's thunk: semantic params consume the macro-authored raw list with name/kind/payload assertions, and the walk produces the thunk parameter declarations, the reverse-marshal statements, and the interface-call arguments together so they cannot disagree.
+def _thunk_pieces(trait: Trait, method: Method, mirrors: _Mirrors) -> tuple[list[str], list[str], list[str], str, str]:
+    where = f"{trait.name}.{method.name}"
+    raw = list(method.raw_params)
+
+    def take(expected_name: str, expected_kind: str, expected_scalar: str = "", expected_mirror: str = "") -> RawParam:
+        if not raw:
+            raise GenError(f"{where}: raw signature ran out of params at '{expected_name}' (macro/emitter derivation drift)")
+        head = raw.pop(0)
+        if head.name != expected_name or head.kind != expected_kind:
+            raise GenError(f"{where}: raw param mismatch: expected {expected_name}/{expected_kind}, recorded {head.name}/{head.kind} (macro/emitter derivation drift)")
+        if expected_scalar and head.scalar != expected_scalar:
+            raise GenError(f"{where}: raw param '{head.name}' recorded as scalar {head.scalar}, expected {expected_scalar} (macro/emitter derivation drift)")
+        if expected_mirror and head.mirror_name != expected_mirror:
+            raise GenError(f"{where}: raw param '{head.name}' recorded as mirror {head.mirror_name}, expected {expected_mirror} (macro/emitter derivation drift)")
+        return head
+
+    thunk_params: list[str] = ["ulong userdata"]
+    marshal: list[str] = []
+    call_args: list[str] = []
+    for param in method.params:
+        name = _camel(param.name)
+        if param.ty.kind == "scalar" and param.ty.scalar == "bool":
+            take(param.name, "scalar", expected_scalar="u8")
+            thunk_params.append(f"byte {name}")
+            call_args.append(f"{name} != 0")
+        elif param.ty.kind == "scalar":
+            head = take(param.name, "scalar", expected_scalar=param.ty.scalar)
+            thunk_params.append(f"{_raw_scalar_cs(head.scalar, where)} {name}")
+            call_args.append(name)
+        elif param.ty.kind == "mirror" and mirrors.is_enum(param.ty.mirror_name):
+            take(param.name, "enum_repr", expected_mirror=param.ty.mirror_name)
+            thunk_params.append(f"{mirrors.enum_(param.ty.mirror_name, where).name} {name}")
+            call_args.append(name)
+        elif param.ty.kind == "str":
+            take(f"{param.name}_ptr", "const_ptr_scalar", expected_scalar="u8")
+            take(f"{param.name}_len", "scalar", expected_scalar="usize")
+            thunk_params.append(f"byte* {name}Ptr")
+            thunk_params.append(f"nuint {name}Len")
+            marshal.append(f"string {name} = {name}Len == 0 ? \"\" : Encoding.UTF8.GetString({name}Ptr, checked((int){name}Len));")
+            call_args.append(name)
+        else:
+            raise GenError(f"{where}: trait-method parameter shape '{param.ty.kind}' has no consumer yet; its emission lands with its first consumer")
+
+    interface_return = "void"
+    invoke_statement = f"target.{_pascal(method.name)}({', '.join(call_args)});"
+    if method.returns:
+        if len(method.returns) > 1:
+            raise GenError(f"{where}: multi-value trait-method returns have no consumer yet")
+        ret = next(iter(method.returns))
+        if ret.ty.kind != "scalar":
+            raise GenError(f"{where}: trait-method return shape '{ret.ty.kind}' has no consumer yet")
+        head = take("out_value", "mut_ptr_scalar", expected_scalar=_expected_raw_scalar(ret.ty.scalar))
+        raw_cs = _raw_scalar_cs(head.scalar, where)
+        thunk_params.append(f"{raw_cs}* outValue")
+        if ret.ty.scalar == "bool":
+            interface_return = "bool"
+            invoke_statement = f"*outValue = (byte)(target.{_pascal(method.name)}({', '.join(call_args)}) ? 1 : 0);"
+        elif ret.ty.scalar == "usize":
+            interface_return = "int"
+            invoke_statement = f"*outValue = (nuint)target.{_pascal(method.name)}({', '.join(call_args)});"
+        else:
+            interface_return = raw_cs
+            invoke_statement = f"*outValue = target.{_pascal(method.name)}({', '.join(call_args)});"
+
+    if raw:
+        raise GenError(f"{where}: raw signature has {len(raw)} unconsumed params starting at '{raw[0].name}' (macro/emitter derivation drift)")
+    return thunk_params, marshal, call_args, interface_return, invoke_statement
+
+
+def _interface_params(trait: Trait, method: Method, mirrors: _Mirrors) -> list[str]:
+    where = f"{trait.name}.{method.name}"
+    declarations: list[str] = []
+    for param in method.params:
+        name = _camel(param.name)
+        if param.ty.kind == "scalar" and param.ty.scalar == "bool":
+            declarations.append(f"bool {name}")
+        elif param.ty.kind == "scalar":
+            declarations.append(f"{_scalar_cs(param.ty.scalar, where)} {name}")
+        elif param.ty.kind == "mirror" and mirrors.is_enum(param.ty.mirror_name):
+            declarations.append(f"{mirrors.enum_(param.ty.mirror_name, where).name} {name}")
+        elif param.ty.kind == "str":
+            declarations.append(f"string {name}")
+        else:
+            raise GenError(f"{where}: trait-method parameter shape '{param.ty.kind}' has no consumer yet")
+    return declarations
+
+
+def _emit_trait_interface(trait: Trait, mirrors: _Mirrors) -> str:
+    lines = [_HEADER]
+    lines.append("namespace Buckminster;")
+    lines.append("")
+    lines.extend(_doc_lines(trait.docs, ""))
+    lines.append(f"public interface I{trait.name}")
+    lines.append("{")
+    first = True
+    for method in trait.methods:
+        if not first:
+            lines.append("")
+        first = False
+        lines.extend(_doc_lines(method.docs, "    "))
+        _, _, _, interface_return, _ = _thunk_pieces(trait, method, mirrors)
+        lines.append(f"    {interface_return} {_pascal(method.name)}({', '.join(_interface_params(trait, method, mirrors))});")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def _emit_trait_thunks(trait: Trait, mirrors: _Mirrors) -> str:
+    lines = [_HEADER]
+    lines.append("using System;")
+    lines.append("using System.Runtime.InteropServices;")
+    if any(param.ty.kind == "str" for method in trait.methods for param in method.params):
+        lines.append("using System.Text;")
+    lines.append("")
+    lines.append("namespace Buckminster.Ffi;")
+    lines.append("")
+    lines.append(f"// Bridges a C# I{trait.name} implementation into the {trait.vtable} Rust consumes: the canonical thunk shape (no exception escapes -- failures stash and return nonzero), CallbackTable registration, and a release thunk that unregisters (invoked by the Rust proxy's Drop: deterministic lifetime, no GC timing).")
+    lines.append(f"internal static class {trait.name}Thunks")
+    lines.append("{")
+    lines.append(f"    internal static unsafe {trait.vtable} Create(I{trait.name} implementation)")
+    lines.append("    {")
+    lines.append(f"        return new {trait.vtable}")
+    lines.append("        {")
+    lines.append("            Userdata = CallbackTable.Register(implementation),")
+    for method in trait.methods:
+        thunk_params, _, _, _, _ = _thunk_pieces(trait, method, mirrors)
+        delegate_types = ", ".join(declaration.split(" ")[0] for declaration in thunk_params)
+        lines.append(f"            {_pascal(method.name)} = (IntPtr)(delegate* unmanaged<{delegate_types}, int>)&{_pascal(method.name)}Thunk,")
+    lines.append("            Release = (IntPtr)(delegate* unmanaged<ulong, int>)&ReleaseThunk,")
+    lines.append("        };")
+    lines.append("    }")
+    for method in trait.methods:
+        thunk_params, marshal, _, _, invoke_statement = _thunk_pieces(trait, method, mirrors)
+        unsafe = "unsafe " if any("*" in declaration for declaration in thunk_params) else ""
+        lines.append("")
+        lines.append("    [UnmanagedCallersOnly]")
+        lines.append(f"    private static {unsafe}int {_pascal(method.name)}Thunk({', '.join(thunk_params)})")
+        lines.append("    {")
+        lines.append("        try")
+        lines.append("        {")
+        lines.append(f"            I{trait.name} target = (I{trait.name})CallbackTable.Get(userdata);")
+        for statement in marshal:
+            lines.append(f"            {statement}")
+        lines.append(f"            {invoke_statement}")
+        lines.append("            return 0;")
+        lines.append("        }")
+        lines.append("        catch (Exception exception)")
+        lines.append("        {")
+        lines.append("            CallbackExceptionStash.Stash(exception);")
+        lines.append("            return 1;")
+        lines.append("        }")
+        lines.append("    }")
+    lines.append("")
+    lines.append("    [UnmanagedCallersOnly]")
+    lines.append("    private static int ReleaseThunk(ulong userdata)")
+    lines.append("    {")
+    lines.append("        try")
+    lines.append("        {")
+    lines.append("            CallbackTable.Unregister(userdata);")
+    lines.append("            return 0;")
+    lines.append("        }")
+    lines.append("        catch (Exception exception)")
+    lines.append("        {")
+    lines.append("            CallbackExceptionStash.Stash(exception);")
+    lines.append("            return 1;")
+    lines.append("        }")
+    lines.append("    }")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
 def _write_owned_dir(directory: str, files: dict[str, str]) -> None:
     """Writes the exact file set into the owned directory (write-if-changed so identical regeneration doesn't dirty dotnet; LF, UTF-8-no-BOM) and deletes strays."""
     os.makedirs(directory, exist_ok=True)
@@ -676,7 +889,7 @@ def _write_owned_dir(directory: str, files: dict[str, str]) -> None:
 def generate(dump_path: str, repo_root: str) -> int:
     """Emits all generated C# from the dump. Returns a process-style exit code; failures print a loud GenError."""
     try:
-        exports, structs, enums = _parse_dump(dump_path)
+        exports, structs, enums, traits = _parse_dump(dump_path)
         mirrors = _Mirrors(structs={struct.name: struct for struct in structs}, enums={enum.name: enum for enum in enums})
 
         methods: dict[str, str] = {}
@@ -693,6 +906,9 @@ def generate(dump_path: str, repo_root: str) -> int:
             _add_file(code_files, f"{struct.name}.g.cs", _emit_struct(struct, mirrors))
         for enum in enums:
             _add_file(code_files, f"{enum.name}.g.cs", _emit_enum(enum))
+        for trait in traits:
+            _add_file(code_files, f"I{trait.name}.g.cs", _emit_trait_interface(trait, mirrors))
+            _add_file(code_files, f"{trait.name}Thunks.g.cs", _emit_trait_thunks(trait, mirrors))
         test_files: dict[str, str] = {}
         _add_file(test_files, "LayoutTests.g.cs", _emit_layout_tests(structs))
 

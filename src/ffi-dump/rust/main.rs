@@ -2,13 +2,14 @@
 
 use serde::Serialize;
 
-use buckminster_core::ffi::meta::{MetaEnum, MetaExport, MetaStruct};
+use buckminster_core::ffi::meta::{MetaEnum, MetaExport, MetaStruct, MetaTrait};
 
 #[derive(Serialize)]
 struct Dump {
     exports: Vec<&'static MetaExport>,
     structs: Vec<&'static MetaStruct>,
     enums: Vec<&'static MetaEnum>,
+    traits: Vec<&'static MetaTrait>,
 }
 
 /// The full dump, sorted by (crate, name) at every level -- inventory iteration order is link-dependent, and the emitter's write-if-changed discipline needs byte-stable output.
@@ -22,10 +23,14 @@ fn dump_json() -> String {
     let mut enums: Vec<&'static MetaEnum> =
         buckminster_core::ffi::inventory::iter::<MetaEnum>().collect();
     enums.sort_by_key(|item| (item.crate_name, item.name));
+    let mut traits: Vec<&'static MetaTrait> =
+        buckminster_core::ffi::inventory::iter::<MetaTrait>().collect();
+    traits.sort_by_key(|item| (item.crate_name, item.name));
     let dump = Dump {
         exports,
         structs,
         enums,
+        traits,
     };
     let mut json =
         serde_json::to_string_pretty(&dump).expect("the meta types serialize infallibly");

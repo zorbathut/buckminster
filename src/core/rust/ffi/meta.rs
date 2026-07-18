@@ -52,6 +52,8 @@ pub enum MetaType {
     },
     /// A registry handle: typed `Rid` in Rust, plain u64 at the raw layer, `ulong` in C# today -- the distinct kind is what lets the emitter grow typed C# handles later without touching Rust.
     Rid,
+    /// An extern "C" fn pointer inside a #[buck_trait] vtable; C# sees IntPtr (the standing wasm binding constraint). Never appears in #[buck_struct] fields or export signatures.
+    FnPtr,
 }
 
 /// A raw (extern "C" layer) parameter type: what the generated extern declares and what the C# [LibraryImport] declares.
@@ -146,6 +148,26 @@ pub struct MetaEnum {
     pub variants: &'static [MetaVariant],
 }
 
+/// One method of a #[buck_trait] trait: the same param/return/raw model as an export, but the raw signature describes the vtable's fn pointer (userdata leads implicitly; the emitter prepends it).
+#[derive(Serialize, Debug)]
+pub struct MetaMethod {
+    pub name: &'static str,
+    pub docs: &'static [&'static str],
+    pub params: &'static [MetaParam],
+    pub returns: &'static [MetaReturn],
+    pub raw_params: &'static [MetaRawParam],
+}
+
+/// A #[buck_trait] trait: C# implements the generated public interface, and the vtable (registered separately as a MetaStruct with FnPtr fields) carries it across.
+#[derive(Serialize, Debug)]
+pub struct MetaTrait {
+    pub crate_name: &'static str,
+    pub name: &'static str,
+    pub docs: &'static [&'static str],
+    pub vtable: &'static str,
+    pub methods: &'static [MetaMethod],
+}
+
 /// Type identity for mirrored types in export signatures: #[buck_struct]/#[buck_enum] implement this (dump builds only), and #[buck_export] metadata references the consts instead of stringifying tokens.
 pub trait BuckMirror {
     const CRATE: &'static str;
@@ -155,3 +177,4 @@ pub trait BuckMirror {
 inventory::collect!(MetaExport);
 inventory::collect!(MetaStruct);
 inventory::collect!(MetaEnum);
+inventory::collect!(MetaTrait);

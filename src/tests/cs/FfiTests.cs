@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
 using Buckminster;
 using Buckminster.Ffi;
 using NUnit.Framework;
@@ -10,60 +9,31 @@ namespace Buckminster.Tests;
 [TestFixture]
 public class FfiTests
 {
-    private sealed class CallbackTarget
+    // The trait-machinery demonstrators: ICallbackDemo implementations that do arithmetic, throw, and reenter the FFI; the generated CallbackDemoThunks carry them across.
+    private sealed class DemoDouble : ICallbackDemo
     {
         public int ObservedValue;
-    }
 
-    [UnmanagedCallersOnly]
-    private static unsafe int CallbackDouble(ulong userdata, int value, int* outResult)
-    {
-        // Canonical callback body: no exception may ever escape (PLAN.md callback rule 2) -- catch everything, stash for the caller, report via the return code.
-        try
+        public int Invoke(int value)
         {
-            CallbackTarget target = (CallbackTarget)CallbackTable.Get(userdata);
-            target.ObservedValue = value;
-            *outResult = value * 2;
-            return 0;
-        }
-        catch (Exception e)
-        {
-            CallbackExceptionStash.Stash(e);
-            return 1;
+            ObservedValue = value;
+            return value * 2;
         }
     }
 
-    [UnmanagedCallersOnly]
-    private static unsafe int CallbackThrows(ulong userdata, int value, int* outResult)
+    private sealed class DemoThrows : ICallbackDemo
     {
-        try
+        public int Invoke(int value)
         {
             throw new InvalidOperationException("deliberate exception for FFI containment testing");
         }
-        catch (Exception e)
-        {
-            CallbackExceptionStash.Stash(e);
-            return 1;
-        }
     }
 
-    [UnmanagedCallersOnly]
-    private static unsafe int CallbackReenters(ulong userdata, int value, int* outResult)
+    private sealed class DemoReenters : ICallbackDemo
     {
-        try
+        public int Invoke(int value)
         {
-            FfiCode code = NativeMethods.buck_add(value, 10, out int sum);
-            if (code != FfiCode.Ok)
-            {
-                return (int)code;
-            }
-            *outResult = sum;
-            return 0;
-        }
-        catch (Exception e)
-        {
-            CallbackExceptionStash.Stash(e);
-            return 1;
+            return Native.Add(value, 10);
         }
     }
 
@@ -118,31 +88,34 @@ public class FfiTests
     }
 
     [Test]
-    public unsafe void CallbackRoundTrip()
+    public void CallbackRoundTripAndRelease()
     {
-        CallbackTarget target = new CallbackTarget();
-        ulong key = CallbackTable.Register(target);
-        FfiCode code = NativeMethods.buck_callback_invoke((IntPtr)(delegate* unmanaged<ulong, int, int*, int>)&CallbackDouble, key, 21, out int result);
-        CallbackTable.Unregister(key);
+        DemoDouble demo = new DemoDouble();
+        CallbackDemoVtable vtable = CallbackDemoThunks.Create(demo);
+        int result = Native.TestCallbackDemo(in vtable, 21);
 
-        Assert.That(code, Is.EqualTo(FfiCode.Ok));
         Assert.That(result, Is.EqualTo(42));
-        // The key-table-recovery proof: the instance registered up here observed the value down in the callback.
-        Assert.That(target.ObservedValue, Is.EqualTo(21));
+        // The key-table-recovery proof: the instance registered up here observed the value inside the thunk.
+        Assert.That(demo.ObservedValue, Is.EqualTo(21));
+        // The Rust proxy dropped at export return, firing the release thunk: the registration is gone deterministically, no GC involved.
+        Assert.That(() => CallbackTable.Get(vtable.Userdata), Throws.TypeOf<KeyNotFoundException>());
     }
 
     [Test]
-    public unsafe void CallbackExceptionIsContained()
+    public void CallbackExceptionIsContained()
     {
         CallbackExceptionStash.Take();
-        FfiCode code = NativeMethods.buck_callback_invoke((IntPtr)(delegate* unmanaged<ulong, int, int*, int>)&CallbackThrows, 0, 5, out _);
+        CallbackDemoVtable vtable = CallbackDemoThunks.Create(new DemoThrows());
+        FfiCode code = NativeMethods.buck_test_callback_demo(in vtable, 5, out _);
 
         Assert.That(code, Is.EqualTo(FfiCode.CallbackError));
-        Assert.That(NativeMethods.LastErrorMessage(), Does.Contain("callback returned error code 1"));
+        Assert.That(NativeMethods.LastErrorMessage(), Does.Contain("CallbackDemo::invoke returned error code 1"));
         Exception? caught = CallbackExceptionStash.Take();
         Assert.That(caught, Is.InstanceOf<InvalidOperationException>());
         // Take-semantics: consuming the stash empties it, so a stale exception can't be misattributed later.
         Assert.That(CallbackExceptionStash.Take(), Is.Null);
+        // Release fires on the ERROR return path too: the proxy dropped during Err propagation.
+        Assert.That(() => CallbackTable.Get(vtable.Userdata), Throws.TypeOf<KeyNotFoundException>());
 
         // The runtime survived the contained exception: a subsequent call works normally.
         FfiCode addCode = NativeMethods.buck_add(2, 2, out int sum);
@@ -151,13 +124,13 @@ public class FfiTests
     }
 
     [Test]
-    public unsafe void CallbackReentersFfi()
+    public void CallbackReentersFfi()
     {
         // Pins guard nesting: a callback calling back into buck_* on the same thread is the normal future state (PLAN.md: callbacks used freely), not an edge case. The pre-existing error proves nested success handles LAST_ERROR sanely.
         NativeMethods.buck_test_panic();
-        FfiCode code = NativeMethods.buck_callback_invoke((IntPtr)(delegate* unmanaged<ulong, int, int*, int>)&CallbackReenters, 0, 5, out int result);
+        CallbackDemoVtable vtable = CallbackDemoThunks.Create(new DemoReenters());
+        int result = Native.TestCallbackDemo(in vtable, 5);
 
-        Assert.That(code, Is.EqualTo(FfiCode.Ok));
         Assert.That(result, Is.EqualTo(15));
         Assert.That(NativeMethods.LastErrorMessage(), Is.Null);
     }

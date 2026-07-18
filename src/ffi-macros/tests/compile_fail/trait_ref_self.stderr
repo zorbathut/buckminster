@@ -1,0 +1,5 @@
+error: #[buck_trait] methods take &mut self
+ --> tests/compile_fail/trait_ref_self.rs:7:5
+  |
+7 |     fn poke(&self, value: i32) -> Result<i32, MyErr>;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

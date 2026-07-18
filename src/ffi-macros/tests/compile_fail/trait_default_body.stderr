@@ -1,0 +1,5 @@
+error: #[buck_trait] methods are bodiless (the C# interface cannot carry a default body)
+ --> tests/compile_fail/trait_default_body.rs:7:8
+  |
+7 |     fn poke(&mut self, value: i32) -> Result<i32, MyErr> {
+  |        ^^^^

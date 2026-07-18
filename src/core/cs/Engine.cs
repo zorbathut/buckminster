@@ -1,7 +1,6 @@
 using System;
-using System.Collections.Generic;
-using System.Runtime.InteropServices;
 using System.Text;
+using System.Collections.Generic;
 using Buckminster.Ffi;
 
 namespace Buckminster;
@@ -18,7 +17,6 @@ public sealed class Engine : IDisposable
     // The init lifecycle latches: started closes registration (including from inside a module's own Initialize), failed wedges the engine loudly -- re-pumping after a failed init would silently re-run the Initializes that succeeded before the failure.
     private bool initStarted;
     private bool initFailed;
-    private readonly ulong logSinkKey;
     private readonly List<IModule> modules = new List<IModule>();
     private readonly HashSet<Type> moduleTypes = new HashSet<Type>();
 
@@ -37,31 +35,29 @@ public sealed class Engine : IDisposable
     // Completed ticks. Increments only after the modules and the native tick have all run, so a thrown module Tick can't desync this from the Rust-side counter.
     public ulong TickCount { get; private set; }
 
-    private Engine(ulong handle, ulong logSinkKey)
+    private Engine(ulong handle)
     {
         this.handle = handle;
-        this.logSinkKey = logSinkKey;
     }
 
     // The log sink is mandatory: silent log dropping is banned and there is no principled "absent" value -- a host that truly wants to discard logs writes that decision down as a discarding delegate. Registration is process-global last-wins (logging is process-scoped; multi-engine separation is a non-goal -- which also covers the known sharp edge that a DIFFERENT live engine's sink throwing during this create's exit-drain surfaces here as CallbackError and strands the new Rust-side handle, since the out-param is unspecified on nonzero returns and cannot be destroyed).
-    public static unsafe Engine Create(EngineConfig config, Action<LogLevel, string> logSink)
+    public static Engine Create(EngineConfig config, Action<LogLevel, string> logSink)
     {
         ulong handle = Native.EngineCreate(config);
-        ulong logSinkKey = CallbackTable.Register(logSink);
+        LogSinkVtable vtable = LogSinkThunks.Create(new SinkAdapter(logSink));
         try
         {
-            // buck_log_sink_set's own exit is the first delivery point, and the buffer may hold residue (a previous engine's pushback tail); if the new sink throws on it, the just-created handle and key must not leak.
-            FfiCall.ThrowOnError(NativeMethods.buck_log_sink_set((IntPtr)(delegate* unmanaged<ulong, int, byte*, nuint, int>)&LogSinkThunk, logSinkKey), "log sink registration");
+            // buck_log_sink_set's own exit is the first delivery point, and the buffer may hold residue (a previous engine's pushback tail); if the new sink throws on it, the just-created handle and registration must not leak.
+            Native.LogSinkSet(in vtable);
         }
         catch
         {
-            // Cleanup ORDER is load-bearing: clear the Rust registration FIRST (its own exit-drain copies None and delivers nothing), so the unregister and destroy below can never fire the now-dead key -- reversing this leaves a dangling registration whose dead key breaks every subsequent create in the process. The two return codes are deliberately unchecked: with the registration already cleared they can only fail via states that would themselves have thrown above, and the sink's original exception must win.
+            // Cleanup ORDER is load-bearing: clear the Rust registration FIRST (dropping the Rust-side proxy fires the release thunk, which unregisters the callback key deterministically), so nothing later can fire a dead key. The two return codes are deliberately unchecked raw calls: with the registration already cleared they can only fail via states that would themselves have thrown above, and the sink's original exception must win.
             NativeMethods.buck_log_sink_clear();
-            CallbackTable.Unregister(logSinkKey);
             NativeMethods.buck_engine_destroy(handle);
             throw;
         }
-        return new Engine(handle, logSinkKey);
+        return new Engine(handle);
     }
 
     // Registration is open until init starts (the first PumpEvents); dependencies are declared by concrete type, so a second instance of the same type would make every dependency on it ambiguous.
@@ -181,8 +177,8 @@ public sealed class Engine : IDisposable
         finally
         {
             handle = 0;
-            FfiCall.ThrowOnError(NativeMethods.buck_log_sink_clear(), "log sink clear");
-            CallbackTable.Unregister(logSinkKey);
+            // Clearing drops the Rust-side proxy, whose release thunk unregisters the callback key -- no manual bookkeeping.
+            Native.LogSinkClear();
         }
     }
 
@@ -271,20 +267,19 @@ public sealed class Engine : IDisposable
         return cycle.ToString();
     }
 
-    // The standard callback thunk shape (static, [UnmanagedCallersOnly], u64 key, exception stashed and reported as a nonzero return -- never thrown across the FFI).
-    [UnmanagedCallersOnly]
-    private static unsafe int LogSinkThunk(ulong userdata, int level, byte* message, nuint length)
+    // Adapts the host's sink delegate to the generated ILogSink interface; LogSinkThunks carries it across the boundary.
+    private sealed class SinkAdapter : ILogSink
     {
-        try
+        private readonly Action<LogLevel, string> sink;
+
+        public SinkAdapter(Action<LogLevel, string> sink)
         {
-            Action<LogLevel, string> logSink = (Action<LogLevel, string>)CallbackTable.Get(userdata);
-            logSink((LogLevel)level, Encoding.UTF8.GetString(message, checked((int)length)));
-            return 0;
+            this.sink = sink;
         }
-        catch (Exception exception)
+
+        public void Write(LogLevel level, string msg)
         {
-            CallbackExceptionStash.Stash(exception);
-            return 1;
+            sink(level, msg);
         }
     }
 

@@ -7,6 +7,7 @@ use proc_macro::TokenStream;
 mod export;
 mod mirror;
 mod shared;
+mod trait_gen;
 
 /// On an idiomatic `fn name(...) -> Result<T, FfiError>` or plain `fn name(...) -> T`: generates the `#[no_mangle] extern "C" fn buck_name(...)` wrapper (guard, pointer checks, span/str marshaling, returns -> out-params) plus dump metadata. The Result form is for FFI/lifecycle problems only (stale handles, wrong thread, protocol violations); domain failures are ordinary returned data, and a fn with no FFI-lifecycle concerns declares the plain form. Args: `public` (generated C# wrapper visibility), `ret_names(a, b, ...)` (out-param / tuple-field names; required for tuple returns).
 #[proc_macro_attribute]
@@ -28,6 +29,14 @@ pub fn buck_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn buck_enum(attr: TokenStream, item: TokenStream) -> TokenStream {
     mirror::expand_enum(attr.into(), item.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// On an FFI-expressible trait (methods take vocabulary types and return Result<T, FfiError>): generates the #[repr(C)] vtable, the borrowed (vtable) and owning (Proxy, release-on-Drop) Rust implementations, and dump metadata for the generated public C# interface + thunks. No args.
+#[proc_macro_attribute]
+pub fn buck_trait(attr: TokenStream, item: TokenStream) -> TokenStream {
+    trait_gen::expand(attr.into(), item.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
