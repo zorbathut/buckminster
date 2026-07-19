@@ -17,3 +17,9 @@ ffi-dump = ["buckminster-core/ffi-dump"]
 
 [dependencies]
 buckminster-core = { path = "../core" }
+# The logging facade: the platform layer's diagnostics ride the same process-global pipeline as everything else.
+log = "0.4"
+# winit, pinned exact: 0.31 is a breaking redesign in beta (dyn traits, moved pump module) and the pump-events surface is version-sensitive. This crate is native-only by construction (the wasm executor never links it), so no emscripten target-gating is needed.
+winit = "=0.30.13"
+# softbuffer is the interim window-clear presenter: Wayland never MAPS a window until a buffer is committed, so an unpainted window is invisible (taskbar entry, no surface). One solid-color present on RedrawRequested makes windows real; M6's WebGPU surface replaces it.
+softbuffer = "0.4"

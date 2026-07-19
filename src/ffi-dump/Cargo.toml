@@ -10,8 +10,8 @@ name = "buckminster-ffi-dump"
 path = "rust/main.rs"
 
 [dependencies]
-# Feature-union rule (PLAN.md, binding-generation entry): the dump must see every feature-gated export, so each exporting-crate dependency lists the union of that crate's features. Core: ffi-dump (the registration switch) plus window (default-on anyway, listed so turning the default off can't silently shrink the dump).
-buckminster-core = { path = "../core", features = ["ffi-dump", "window"] }
+# Feature-union rule (PLAN.md, binding-generation entry): the dump must see every feature-gated export, so each exporting-crate dependency lists the union of that crate's features (currently: just the ffi-dump registration switch each).
+buckminster-core = { path = "../core", features = ["ffi-dump"] }
 # Renamed dependency: the host crate's lib name is "buckminster" (the executor artifact), and the rename gives main.rs a readable extern name for its keep-the-crate-linked reference.
 buckminster_host_desktop = { path = "../host-desktop", package = "buckminster-host-desktop", features = ["ffi-dump"] }
 serde = { version = "1", features = ["derive"] }

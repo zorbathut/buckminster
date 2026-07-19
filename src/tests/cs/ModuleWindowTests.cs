@@ -70,15 +70,43 @@ public class ModuleWindowTests
         Assert.Throws<InvalidOperationException>(() => module.InjectEvent(window, WindowEventData.CloseRequested()));
     }
 
+    // A fake platform provider for the seam (the real one lives in the host-desktop assembly, which tests can't reference -- it would drag pinvoke-bearing code into the wasm publishes, the exact thing the hoist removed). These tests only exercise wiring, never a live platform.
+    private sealed class PlatformFake : IPlatformWindowing
+    {
+        private ulong nextRid = 1;
+
+        public void Pump()
+        {
+        }
+
+        public (uint Written, uint Remaining) Poll(Span<Buckminster.Ffi.PlatformEventRaw> buffer)
+        {
+            return (0, 0);
+        }
+
+        public ulong CreateNativeWindow(string title, uint width, uint height)
+        {
+            // Distinct nonzero rids: nonzero marks the window native-backed, distinct keeps ModuleWindow's byNativeRid map from a confusing duplicate-key blowup if a test ever creates two.
+            return nextRid++;
+        }
+
+        public void DestroyNativeWindow(ulong window)
+        {
+        }
+
+        public void SetNativeWindowTitle(ulong window, string title)
+        {
+        }
+    }
+
     [Test]
     public void DependenciesFollowThePlatformWiring()
     {
-        // Constructing ModulePlatformDesktop is FFI-free (the event loop is lazy), so this runs on every cell; nothing here Initializes the platform module, which WOULD touch the FFI. The registry's topo behavior itself is pinned by ModuleRegistryTests.
+        // The registry's topo behavior itself is pinned by ModuleRegistryTests; this pins that the wiring drives the dependency declaration -- by the provider's concrete type.
         ModuleWindow headless = new ModuleWindow();
         Assert.That(headless.Dependencies, Is.Empty);
-        ModulePlatformDesktop platform = new ModulePlatformDesktop();
-        ModuleWindow windowed = new ModuleWindow(platform);
-        Assert.That(windowed.Dependencies, Is.EqualTo(new[] { typeof(ModulePlatformDesktop) }));
+        ModuleWindow windowed = new ModuleWindow(new PlatformFake());
+        Assert.That(windowed.Dependencies, Is.EqualTo(new[] { typeof(PlatformFake) }));
     }
 
     [Test]

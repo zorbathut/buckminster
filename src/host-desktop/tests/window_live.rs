@@ -8,7 +8,7 @@ fn create_pump_destroy_round_trip() {
     let mut window: u64 = 0;
     let title = "buckminster window_live probe";
     let code = unsafe {
-        buckminster_core::platform::buck_window_create(
+        buckminster::platform::buck_window_create(
             title.as_ptr(),
             title.len(),
             320,
@@ -25,7 +25,7 @@ fn create_pump_destroy_round_trip() {
     // A few pumps to let the compositor configure the window; poll everything that shows up.
     let mut seen_any = false;
     for _ in 0..20 {
-        assert_eq!(buckminster_core::platform::buck_platform_pump(), 0);
+        assert_eq!(buckminster::platform::buck_platform_pump(), 0);
         let mut buf = [PlatformEventRaw {
             window: 0,
             kind: 0,
@@ -36,7 +36,7 @@ fn create_pump_destroy_round_trip() {
         let mut written: u32 = 0;
         let mut remaining: u32 = 0;
         let poll = unsafe {
-            buckminster_core::platform::buck_platform_events_poll(
+            buckminster::platform::buck_platform_events_poll(
                 buf.as_mut_ptr(),
                 buf.len(),
                 &mut written,
@@ -57,7 +57,7 @@ fn create_pump_destroy_round_trip() {
     let new_title = "buckminster window_live probe (retitled)";
     assert_eq!(
         unsafe {
-            buckminster_core::platform::buck_window_set_title(
+            buckminster::platform::buck_window_set_title(
                 window,
                 new_title.as_ptr(),
                 new_title.len(),
@@ -69,7 +69,7 @@ fn create_pump_destroy_round_trip() {
     let mut width: u32 = 0;
     let mut height: u32 = 0;
     assert_eq!(
-        unsafe { buckminster_core::platform::buck_window_size(window, &mut width, &mut height) },
+        unsafe { buckminster::platform::buck_window_size(window, &mut width, &mut height) },
         0
     );
     assert!(
@@ -77,9 +77,9 @@ fn create_pump_destroy_round_trip() {
         "window reports a real size ({width}x{height})"
     );
 
-    assert_eq!(buckminster_core::platform::buck_window_destroy(window), 0);
+    assert_eq!(buckminster::platform::buck_window_destroy(window), 0);
     // Destroy again: stale handle must fail loudly, never alias.
-    assert_ne!(buckminster_core::platform::buck_window_destroy(window), 0);
+    assert_ne!(buckminster::platform::buck_window_destroy(window), 0);
 
     // The compositor may or may not have delivered events in the window's brief life (Wayland often waits for a present); report rather than assert.
     println!("window_live: saw events during the probe: {seen_any}");

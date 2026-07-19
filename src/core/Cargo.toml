@@ -11,9 +11,6 @@ path = "rust/lib.rs"
 crate-type = ["rlib"]
 
 [features]
-# The windowing platform layer (PLAN.md M5). Default-on: the buck_platform_*/buck_window_* symbols must exist on every target (the wasm static link resolves the pinvoke table by name and fails on undefined symbols), so wasm builds compile the module too -- as loud stubs there, since winit has no emscripten backend.
-default = ["window"]
-window = ["dep:winit", "dep:softbuffer"]
 # Dump-only FFI metadata registration (the #[cfg] the buck_* macros emit, plus ffi::meta). Enabled exclusively by buckminster-ffi-dump, which lives outside the workspace default-members so feature unification can never switch this on in a shipped artifact.
 ffi-dump = ["dep:inventory", "dep:serde"]
 
@@ -25,9 +22,3 @@ log = "0.4"
 # Dump-only (see the ffi-dump feature): inventory carries the macros' metadata registrations, serde serializes them.
 inventory = { version = "0.3", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
-
-# winit is native-only: its wasm backend is wasm-bindgen/wasm32-unknown-unknown, not emscripten, so the emscripten build compiles platform stubs instead (platform.rs). Pinned exact: 0.31 is a breaking redesign in beta (dyn traits, moved pump module) and the pump-events surface is version-sensitive.
-# softbuffer is the interim window-clear presenter: Wayland never MAPS a window until a buffer is committed, so an unpainted window is invisible (taskbar entry, no surface). One solid-color present on RedrawRequested makes windows real; M6's WebGPU surface replaces it.
-[target.'cfg(not(target_os = "emscripten"))'.dependencies]
-winit = { version = "=0.30.13", optional = true }
-softbuffer = { version = "0.4", optional = true, default-features = true }

@@ -109,8 +109,6 @@ dependencies = [
  "inventory",
  "log",
  "serde",
- "softbuffer",
- "winit",
 ]
 
 [[package]]
@@ -138,6 +136,9 @@ name = "buckminster-host-desktop"
 version = "0.1.0"
 dependencies = [
  "buckminster-core",
+ "log",
+ "softbuffer",
+ "winit",
 ]
 
 [[package]]

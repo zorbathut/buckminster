@@ -1,7 +1,9 @@
-//! buckminster-host-desktop: the desktop executor's Rust half -- the native link root C# loads on desktop (host-as-executor composition: core is a library linked into this cdylib, not the other way around). The winit platform layer lands here in the hoist chunk; until then this crate is the multi-crate FFI pipeline's proof.
+//! buckminster-host-desktop: the desktop executor's Rust half -- the native link root C# loads on desktop (host-as-executor composition: core is a library linked into this cdylib, not the other way around), and since the M5.75 hoist the home of the winit platform layer (platform.rs).
 
 // Core must be a hard reference of this crate: an unreferenced dependency is not linked into the cdylib at all, which would silently drop every buck_* export core defines. The macro-emitted ::buckminster_core:: paths below reference it too; this line is the explicit guarantee that survives refactors (underscore import: linkage only, no re-exported API).
 use buckminster_core as _;
+
+pub mod platform;
 
 use buckminster_core::ffi::buck_export;
 

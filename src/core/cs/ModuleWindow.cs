@@ -7,13 +7,18 @@ namespace Buckminster;
 // The window abstraction module (PLAN.md M5, the owner's layering: a module that RELIES ON platform-specific modules). With a platform module wired, windows are native-backed and this module orchestrates the platform pump each engine PumpEvents; without one, windows are virtual and events arrive only by injection -- headless composition for free, and the same injection entry the future recorded-input trace replays through. Multiple windows are supported structurally; nothing defaults to creating one.
 public sealed class ModuleWindow : IModule
 {
-    private readonly ModulePlatformDesktop? platform;
+    private readonly IPlatformWindowing? platform;
     private readonly List<Window> windows = new List<Window>();
     private readonly Dictionary<ulong, Window> byNativeRid = new Dictionary<ulong, Window>();
     private uint nextWindowId = 1;
 
-    // The platform is conceptually optional with a principled absent value: null = headless/virtual. Known edge, documented rather than machined away: the dependency below is validated by TYPE, so a platform instance that was never registered would pass validation while wired here -- forgetting to register fails loudly via the missing-dependency error, the wrong-instance case waits for a registry lookup API.
-    public ModuleWindow(ModulePlatformDesktop? platform = null)
+    // Two constructors rather than one defaulted parameter because the seam type is internal: the public surface (games and tests build virtual-window compositions) must not name it, while hosts -- IVT'd by core -- wire their platform module through the internal one.
+    public ModuleWindow()
+    {
+    }
+
+    // Known edge, documented rather than machined away: the dependency below is validated by TYPE, so a platform instance that was never listed in the boot list would pass validation while wired here -- forgetting to list it fails loudly via the missing-dependency error, the wrong-instance case waits for a registry lookup API.
+    internal ModuleWindow(IPlatformWindowing platform)
     {
         this.platform = platform;
     }
@@ -94,7 +99,7 @@ public sealed class ModuleWindow : IModule
     {
         if (window.NativeRid != 0)
         {
-            Native.WindowSetTitle(window.NativeRid, title);
+            platform!.SetNativeWindowTitle(window.NativeRid, title);
         }
     }
 

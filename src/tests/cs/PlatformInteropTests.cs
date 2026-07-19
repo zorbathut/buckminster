@@ -7,7 +7,7 @@ using NUnit.Framework;
 
 namespace Buckminster.Tests;
 
-// The C#<->Rust sync checks for the platform vocabulary. The KeyCode mirror is verified EXHAUSTIVELY against the Rust name table -- every member, both directions, plus counts -- because a transposition in the middle of ~195 hand-mirrored entries would otherwise produce wrong-key events forever and a spot-check would sail past it. PlatformEventRaw joins the layout-assertion seam. All of this runs on every cell: the probe and layout exports live outside the platform stubs.
+// The C#<->Rust sync checks for the platform vocabulary. The KeyCode mirror is verified EXHAUSTIVELY against the Rust name table -- every member, both directions, plus counts -- because a transposition in the middle of ~195 hand-mirrored entries would otherwise produce wrong-key events forever and a spot-check would sail past it. PlatformEventRaw joins the layout-assertion seam. All of this runs on every cell: the probe and layout exports live in core, which every cell links (the desktop platform layer itself is host-desktop-only since the M5.75 hoist).
 [TestFixture]
 public class PlatformInteropTests
 {
