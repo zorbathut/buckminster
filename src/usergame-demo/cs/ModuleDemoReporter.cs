@@ -2,7 +2,7 @@ using System;
 
 namespace Buckminster.Usergame.Demo;
 
-// The demo's dependent module: declares the Clock dependency (init order runs through the registry's topo sort) and holds the instance by constructor -- explicit registration means the usergame wires its own instances; the parameterless-ctor convention belongs to the future discovery model, not this.
+// The demo's dependent module: declares the Clock dependency (init order runs through the registry's topo sort) and holds the instance by constructor -- explicit boot-list assembly means the usergame wires its own instances; the parameterless-ctor convention belongs to the future discovery model, not this.
 public sealed class ModuleDemoReporter : IModule
 {
     private const int TicksToRun = 100;
@@ -19,16 +19,20 @@ public sealed class ModuleDemoReporter : IModule
         get { return new[] { typeof(ModuleDemoClock) }; }
     }
 
-    public void Initialize(Engine engine)
+    public void Initialize()
     {
         Log.Info($"ModuleDemoReporter initialized; running to {TicksToRun} ticks");
     }
 
-    public void PumpEvents(Engine engine)
+    public void Shutdown()
     {
     }
 
-    public void Tick(Engine engine, double dt)
+    public void PumpEvents()
+    {
+    }
+
+    public void Tick(double dt)
     {
         if (clock.Ticks % 25 == 0)
         {
@@ -37,7 +41,7 @@ public sealed class ModuleDemoReporter : IModule
         if (clock.Ticks >= TicksToRun)
         {
             Log.Info("ModuleDemoReporter: done, queueing exit");
-            engine.QueueExit();
+            Engine.QueueExit();
         }
     }
 }

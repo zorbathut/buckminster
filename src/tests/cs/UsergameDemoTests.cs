@@ -1,28 +1,25 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using Buckminster.Usergame.Demo;
 
 namespace Buckminster.Tests;
 
-// The demo usergame end-to-end, in-process: the same register/pump/tick-until-ExitQueued cycle the desktop host runs, so the wasm cells get demo coverage the native-only smoke row can't give them.
+// The demo usergame end-to-end, in-process: the same boot-list/MainLoop cycle the desktop host runs (driven through the deterministic IterateWithElapsed instead of the wall clock), so the wasm cells get demo AND pacing coverage the native-only smoke row can't give them.
 [TestFixture]
 public class UsergameDemoTests
 {
     [Test]
     public void DemoRunsToExactlyOneHundredTicks()
     {
-        using Engine engine = Engine.Create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 1024, LogStderrLevelMax = 0 }, (level, message) => { });
-        UsergameDemo.Register(engine);
-        while (!engine.IsReady)
+        using EngineScope scope = new EngineScope(modules: UsergameDemo.Modules());
+        // One fixed step of elapsed per iterate: the first latches Ready (no ticks), each later one runs exactly one. Runaway bound well above 100 so "never exited" reads as its own failure, not an off-by-one.
+        int iterates = 0;
+        while (!Engine.ExitQueued && iterates < 1000)
         {
-            engine.PumpEvents();
+            MainLoop.IterateWithElapsed(MainLoop.FixedStep);
+            iterates += 1;
         }
-        // Runaway bound well above 100 so "never exited" reads as its own failure, not an off-by-one.
-        while (!engine.ExitQueued && engine.TickCount < 1000)
-        {
-            engine.PumpEvents();
-            engine.Tick(1.0 / 60.0);
-        }
-        Assert.That(engine.ExitQueued, Is.True, $"ExitQueued never set after {engine.TickCount} ticks");
-        Assert.That(engine.TickCount, Is.EqualTo(100));
+        Assert.That(Engine.ExitQueued, Is.True, $"ExitQueued never set after {Engine.TickCount} ticks");
+        Assert.That(Engine.TickCount, Is.EqualTo(100));
     }
 }

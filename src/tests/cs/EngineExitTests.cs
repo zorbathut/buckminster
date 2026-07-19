@@ -3,15 +3,10 @@ using NUnit.Framework;
 
 namespace Buckminster.Tests;
 
-// Engine.QueueExit / ExitQueued: the deferred exit seam. The engine itself never acts on the flag -- a module calling mid-Tick sits under the engine's own iteration, so synchronous teardown is impossible; the host loop condition is what honors it. These tests pin that division of labor as contract, not comment.
+// Engine.QueueExit / ExitQueued: the deferred exit seam. The engine itself never acts on the flag -- a module calling mid-Tick sits under the engine's own iteration, so synchronous teardown is impossible; the host loop condition is what honors it (and MainLoop's mid-burst check, pinned in MainLoopTests, is pacing policy layered on top). These tests pin that division of labor as contract, not comment. The after-Shutdown throw and post-Shutdown readability live in EngineGlobalsTests with the rest of the static lifecycle.
 [TestFixture]
 public class EngineExitTests
 {
-    private static Engine CreateEngine()
-    {
-        return Engine.Create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 1024, LogStderrLevelMax = 0 }, (level, message) => { });
-    }
-
     private class ModuleQueuesExitInInit : IModule
     {
         public Type[] Dependencies
@@ -19,16 +14,20 @@ public class EngineExitTests
             get { return Type.EmptyTypes; }
         }
 
-        public void Initialize(Engine engine)
+        public void Initialize()
         {
-            engine.QueueExit();
+            Engine.QueueExit();
         }
 
-        public void PumpEvents(Engine engine)
+        public void Shutdown()
         {
         }
 
-        public void Tick(Engine engine, double dt)
+        public void PumpEvents()
+        {
+        }
+
+        public void Tick(double dt)
         {
         }
     }
@@ -42,15 +41,19 @@ public class EngineExitTests
             get { return Type.EmptyTypes; }
         }
 
-        public void Initialize(Engine engine)
+        public void Initialize()
         {
         }
 
-        public void PumpEvents(Engine engine)
+        public void Shutdown()
         {
         }
 
-        public void Tick(Engine engine, double dt)
+        public void PumpEvents()
+        {
+        }
+
+        public void Tick(double dt)
         {
             Ticks += 1;
         }
@@ -59,59 +62,46 @@ public class EngineExitTests
     [Test]
     public void ExitQueuedDefaultsFalseAndQueueExitSetsIt()
     {
-        using Engine engine = CreateEngine();
-        Assert.That(engine.ExitQueued, Is.False);
-        engine.QueueExit();
-        Assert.That(engine.ExitQueued, Is.True);
+        using EngineScope scope = new EngineScope();
+        Assert.That(Engine.ExitQueued, Is.False);
+        Engine.QueueExit();
+        Assert.That(Engine.ExitQueued, Is.True);
         // Idempotent: queueing again is a no-op, not an error.
-        engine.QueueExit();
-        Assert.That(engine.ExitQueued, Is.True);
+        Engine.QueueExit();
+        Assert.That(Engine.ExitQueued, Is.True);
     }
 
     [Test]
     public void QueueExitIsLegalPreReady()
     {
         // The flag is just a flag, Ready or not.
-        using Engine engine = CreateEngine();
-        Assert.That(engine.IsReady, Is.False);
-        engine.QueueExit();
-        Assert.That(engine.ExitQueued, Is.True);
+        using EngineScope scope = new EngineScope();
+        Assert.That(Engine.IsReady, Is.False);
+        Engine.QueueExit();
+        Assert.That(Engine.ExitQueued, Is.True);
     }
 
     [Test]
     public void QueueExitFromModuleInitializeWorks()
     {
-        // The claimed scenario verbatim: a module queues exit from its own Initialize, under PumpEvents' Current save-and-restore. Init still completes -- the flag never short-circuits anything engine-side.
-        using Engine engine = CreateEngine();
-        engine.RegisterModule(new ModuleQueuesExitInInit());
-        engine.PumpEvents();
-        Assert.That(engine.ExitQueued, Is.True);
-        Assert.That(engine.IsReady, Is.True);
+        // The claimed scenario verbatim: a module queues exit from its own Initialize. Init still completes -- the flag never short-circuits anything engine-side.
+        using EngineScope scope = new EngineScope(modules: new IModule[] { new ModuleQueuesExitInInit() });
+        Engine.PumpEvents();
+        Assert.That(Engine.ExitQueued, Is.True);
+        Assert.That(Engine.IsReady, Is.True);
     }
 
     [Test]
     public void TickingPastExitQueuedStillRunsModulesAndCounts()
     {
-        using Engine engine = CreateEngine();
         ModuleTickCounter module = new ModuleTickCounter();
-        engine.RegisterModule(module);
-        engine.PumpEvents();
-        engine.QueueExit();
-        engine.Tick(0.016);
-        engine.Tick(0.016);
-        // The engine never acts on the flag: honoring it is host policy, so ticking past it is fully functional.
+        using EngineScope scope = new EngineScope(modules: new IModule[] { module });
+        Engine.PumpEvents();
+        Engine.QueueExit();
+        Engine.Tick(0.016);
+        Engine.Tick(0.016);
+        // The engine never acts on the flag: honoring it is host policy, so ticking past it is fully functional. (MainLoop chooses not to -- that's ITS policy, not the engine's.)
         Assert.That(module.Ticks, Is.EqualTo(2));
-        Assert.That(engine.TickCount, Is.EqualTo(2));
-    }
-
-    [Test]
-    public void QueueExitThrowsOnDisposedButExitQueuedStaysReadable()
-    {
-        Engine engine = CreateEngine();
-        engine.QueueExit();
-        engine.Dispose();
-        Assert.Throws<ObjectDisposedException>(engine.QueueExit);
-        // The read stays guard-free like IsReady/TickCount: a host wrapper checking the flag after teardown is a plausible consumer.
-        Assert.That(engine.ExitQueued, Is.True);
+        Assert.That(Engine.TickCount, Is.EqualTo(2));
     }
 }

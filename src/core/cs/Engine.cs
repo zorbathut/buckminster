@@ -5,193 +5,192 @@ using Buckminster.Ffi;
 
 namespace Buckminster;
 
-// The friendly C# face of the engine (PLAN.md tick-as-callee: hosts own the loop and call PumpEvents/Tick/Render; the engine never runs one). Wraps the Rust engine handle and owns the module registry. Create, register modules, then pump until IsReady; module init runs inside PumpEvents because init is async-shaped from the foundation up -- M4 completes it in one pump, but hosts must not assume that.
-public sealed class Engine : IDisposable
+// The static true-globals facade (M5.75: process-global concerns live here because they ARE process-global -- one log pipeline, one module list, one exit flag; the multi-instantiable render-residency unit is Demesne, arriving with the ABI split). Lifecycle: Initialize(config, sink, modules) -> pump until IsReady -> the host drives MainLoop -> Shutdown. Module init runs inside PumpEvents because init is async-shaped from the foundation up -- M4 completes it in one pump, but hosts must not assume that. Initialize/Shutdown are cyclable within a process: INITIALIZE is what returns every static (including the Lifecycle invocation list) to virgin, so post-Shutdown reads stay valid until the next cycle begins. All state is host-thread single-threaded; per-instance concurrency returns with Demesne.
+public static class Engine
 {
-    // Backing field for Current; ThreadStatic can't ride an auto-property.
-    [ThreadStatic]
-    private static Engine? currentEngine;
+    private static ulong handle;
+    private static bool initialized;
+    // The init lifecycle latch: a failed module init wedges the engine loudly -- re-pumping after a failure would silently re-run the Initializes that succeeded before it. Recovery is Shutdown + a fresh Initialize.
+    private static bool initFailed;
+    private static readonly List<IModule> modules = new List<IModule>();
+    // The recorded actual init order (topo order isn't unique); Shutdown walks it in reverse, and only over modules whose Initialize completed.
+    private static readonly List<IModule> initOrder = new List<IModule>();
 
-    private ulong handle;
-    private bool disposed;
-    // The init lifecycle latches: started closes registration (including from inside a module's own Initialize), failed wedges the engine loudly -- re-pumping after a failed init would silently re-run the Initializes that succeeded before the failure.
-    private bool initStarted;
-    private bool initFailed;
-    private readonly List<IModule> modules = new List<IModule>();
-    private readonly HashSet<Type> moduleTypes = new HashSet<Type>();
+    public static bool IsReady { get; private set; }
 
-    // The thread-local ambient engine (Ghi Environment.Current lineage; the future environment global composes with this rather than competing). PumpEvents/Tick/Render scope it to themselves with save-and-restore, so module callbacks and log-sink deliveries see the right engine without handle-threading; hosts may also set it directly. Per-thread by design: each thread driving its own engine sees its own Current, and single-threaded wasm is trivially correct. Unset reads are null -- the caller decides loudness (and the save/restore machinery itself must be able to read an unset value). Static lifecycle deliberately does not scope: Create has no instance yet, and Dispose's final tail delivery reports under the caller's ambient value (attribution through the shared process buffer is approximate regardless).
-    public static Engine? Current
-    {
-        get { return currentEngine; }
-        set { currentEngine = value; }
-    }
-
-    public bool IsReady { get; private set; }
-
-    // The deferred exit flag (GLFW WindowShouldClose lineage): QueueExit's caller is typically a module mid-Tick, sitting under the engine's own iteration, where synchronous teardown is impossible -- so the frame finishes and the host loop condition is what honors the flag. The engine itself never acts on it; ticking past it is legal and fully functional, honoring it is host policy. A future platform close event feeds INTO QueueExit rather than reading this. Read stays valid post-Dispose like IsReady/TickCount.
-    public bool ExitQueued { get; private set; }
+    // The deferred exit flag (GLFW WindowShouldClose lineage): QueueExit's caller is typically a module mid-Tick, sitting under the engine's own iteration, where synchronous teardown is impossible -- so the frame finishes and the host loop condition is what honors the flag. The engine itself never acts on it (ticking past it is legal and fully functional; MainLoop's mid-burst check is pacing policy, not engine policy). Read stays valid post-Shutdown like IsReady/TickCount.
+    public static bool ExitQueued { get; private set; }
 
     // Completed ticks. Increments only after the modules and the native tick have all run, so a thrown module Tick can't desync this from the Rust-side counter.
-    public ulong TickCount { get; private set; }
+    public static ulong TickCount { get; private set; }
 
-    private Engine(ulong handle)
-    {
-        this.handle = handle;
-    }
+    // App-lifecycle notifications (LifecycleEvent doc): hosts call NotifyLifecycle, modules and the game subscribe here (typically in their Initialize). The invocation list is cleared by the next Initialize, so cycle N-1's subscribers can never ghost into cycle N.
+    public static event Action<LifecycleEvent>? Lifecycle;
 
-    // The log sink is mandatory: silent log dropping is banned and there is no principled "absent" value -- a host that truly wants to discard logs writes that decision down as a discarding delegate. Registration is process-global last-wins (logging is process-scoped; multi-engine separation is a non-goal -- which also covers the known sharp edge that a DIFFERENT live engine's sink throwing during this create's exit-drain surfaces here as CallbackError and strands the new Rust-side handle, since the out-param is unspecified on nonzero returns and cannot be destroyed).
-    public static Engine Create(EngineConfig config, Action<LogLevel, string> logSink)
+    // The log sink is mandatory: silent log dropping is banned and there is no principled "absent" value -- a host that truly wants to discard logs writes that decision down as a discarding delegate. The sink registration is process-global last-wins on the Rust side; raw-FFI tests that register their own sinks around an initialized Engine inherit that contract knowingly.
+    public static void Initialize(EngineConfig config, Action<LogLevel, string> logSink, IReadOnlyList<IModule> bootModules)
     {
-        ulong handle = Native.EngineCreate(config);
+        if (initialized)
+        {
+            throw new InvalidOperationException("Engine is already initialized; Shutdown first (Initialize/Shutdown cycles are supported)");
+        }
+        // Duplicate concrete types make every dependency declaration on that type ambiguous; the boot list is validated before anything irreversible happens.
+        HashSet<Type> moduleTypes = new HashSet<Type>();
+        foreach (IModule module in bootModules)
+        {
+            if (!moduleTypes.Add(module.GetType()))
+            {
+                throw new InvalidOperationException($"module type {module.GetType().Name} appears twice in the boot list; dependencies are declared by concrete type, so duplicates would be ambiguous");
+            }
+        }
+        ulong created = Native.EngineCreate(config);
         LogSinkVtable vtable = LogSinkThunks.Create(new SinkAdapter(logSink));
         try
         {
-            // buck_log_sink_set's own exit is the first delivery point, and the buffer may hold residue (a previous engine's pushback tail); if the new sink throws on it, the just-created handle and registration must not leak.
+            // buck_log_sink_set's own exit is the first delivery point, and the buffer may hold residue (a previous cycle's pushback tail); if the new sink throws on it, the just-created handle and registration must not leak.
             Native.LogSinkSet(in vtable);
         }
         catch
         {
             // Cleanup ORDER is load-bearing: clear the Rust registration FIRST (dropping the Rust-side proxy fires the release thunk, which unregisters the callback key deterministically), so nothing later can fire a dead key. The two return codes are deliberately unchecked raw calls: with the registration already cleared they can only fail via states that would themselves have thrown above, and the sink's original exception must win. Known narrow gap: if the set failed BEFORE storing (today only the poisoned-mutex panic path), the proxy was never registered Rust-side, clear releases nothing, and the key leaks -- accepted for a path that already means the process is broken.
             NativeMethods.buck_log_sink_clear();
-            NativeMethods.buck_engine_destroy(handle);
+            NativeMethods.buck_engine_destroy(created);
             throw;
         }
-        return new Engine(handle);
+        // Point of no return: reset every static to virgin AFTER the fallible work, so a failed Initialize leaves the previous cycle's post-Shutdown reads intact.
+        handle = created;
+        initialized = true;
+        initFailed = false;
+        IsReady = false;
+        ExitQueued = false;
+        TickCount = 0;
+        Lifecycle = null;
+        modules.Clear();
+        modules.AddRange(bootModules);
+        initOrder.Clear();
+        MainLoop.ResetPacing();
     }
 
-    // Registration is open until init starts (the first PumpEvents); dependencies are declared by concrete type, so a second instance of the same type would make every dependency on it ambiguous.
-    public void RegisterModule(IModule module)
+    public static void Shutdown()
     {
-        ThrowIfDisposed();
-        if (initStarted)
+        if (!initialized)
         {
-            throw new InvalidOperationException($"cannot register {module.GetType().Name}: module registration closes when initialization starts (the first PumpEvents)");
+            // Idempotent like the old Dispose: teardown paths (finally blocks, scope helpers) may run it twice.
+            return;
         }
-        if (!moduleTypes.Add(module.GetType()))
-        {
-            throw new InvalidOperationException($"module type {module.GetType().Name} is already registered; dependencies are declared by concrete type, so duplicates would be ambiguous");
-        }
-        modules.Add(module);
-    }
-
-    // Idempotent, and legal pre-Ready (a module may queue exit from its own Initialize).
-    public void QueueExit()
-    {
-        ThrowIfDisposed();
-        ExitQueued = true;
-    }
-
-    public void PumpEvents()
-    {
-        ThrowIfDisposed();
-        Engine? previous = currentEngine;
-        currentEngine = this;
+        initialized = false;
         try
         {
-            if (initFailed)
+            // Module teardown first, in reverse recorded init order, while the engine's services are still up -- a module's Shutdown may legitimately log. Policy: a throwing module Shutdown must not hold the REST of teardown hostage, so its exception is reported through the log pipeline (loud, synchronous via the sink) and the walk continues; Shutdown itself only throws from the native-teardown path below. (If the sink itself throws while delivering that report, that exception surfaces from here -- the throwing-sink family's normal behavior.)
+            for (int i = initOrder.Count - 1; i >= 0; i--)
             {
-                throw new InvalidOperationException("module initialization previously failed; the engine is unusable -- dispose it and create a fresh one");
-            }
-            if (!IsReady)
-            {
-                initStarted = true;
                 try
                 {
-                    InitializeModules();
+                    initOrder[i].Shutdown();
                 }
-                catch
+                catch (Exception exception)
                 {
-                    initFailed = true;
-                    throw;
-                }
-                IsReady = true;
-            }
-            else
-            {
-                // Module pumps run on Ready-and-later pumps only -- the init pump runs none, so a module's PumpEvents is never called before its Initialize (the IModule contract, pinned by EnginePumpTests).
-                foreach (IModule module in modules)
-                {
-                    module.PumpEvents(this);
+                    Log.Error($"module {initOrder[i].GetType().Name} threw during Shutdown (continuing teardown): {exception}");
                 }
             }
         }
         finally
         {
-            currentEngine = previous;
+            try
+            {
+                // Destroy delivers the buffered tail -- including records logged by module Shutdowns and by destroy itself -- through the still-registered log sink. A throwing sink surfaces from here, but teardown is not hostage to it: the finally clears the registration either way.
+                Native.EngineDestroy(handle);
+            }
+            finally
+            {
+                handle = 0;
+                // Clearing drops the Rust-side proxy, whose release thunk unregisters the callback key -- no manual bookkeeping.
+                Native.LogSinkClear();
+            }
         }
     }
 
-    public void Tick(double dt)
+    // Idempotent, and legal pre-Ready (a module may queue exit from its own Initialize).
+    public static void QueueExit()
     {
-        ThrowIfDisposed();
+        ThrowIfNotInitialized();
+        ExitQueued = true;
+    }
+
+    // The host-called lifecycle entry (LifecycleEvent doc). No host produces these yet -- the channel ships consumer-proven by test, producer-pending.
+    public static void NotifyLifecycle(LifecycleEvent lifecycleEvent)
+    {
+        ThrowIfNotInitialized();
+        Lifecycle?.Invoke(lifecycleEvent);
+    }
+
+    public static void PumpEvents()
+    {
+        ThrowIfNotInitialized();
+        if (initFailed)
+        {
+            throw new InvalidOperationException("module initialization previously failed; the engine is wedged -- Shutdown and Initialize a fresh cycle");
+        }
+        if (!IsReady)
+        {
+            try
+            {
+                InitializeModules();
+            }
+            catch
+            {
+                initFailed = true;
+                throw;
+            }
+            IsReady = true;
+        }
+        else
+        {
+            // Module pumps run on Ready-and-later pumps only -- the init pump runs none, so a module's PumpEvents is never called before its Initialize (the IModule contract, pinned by MainLoopTests/EnginePumpTests).
+            foreach (IModule module in modules)
+            {
+                module.PumpEvents();
+            }
+        }
+    }
+
+    public static void Tick(double dt)
+    {
+        ThrowIfNotInitialized();
         if (!IsReady)
         {
             // The host idiom is pump-and-tick until Ready (PLAN.md async-shaped init), so a pre-Ready Tick is a harmless no-op, not an error: no module runs, no counter advances, sim tick 0 stays pinned to Ready.
             return;
         }
-        Engine? previous = currentEngine;
-        currentEngine = this;
-        try
+        foreach (IModule module in modules)
         {
-            foreach (IModule module in modules)
-            {
-                module.Tick(this, dt);
-            }
-            Native.EngineTick(handle, dt);
+            module.Tick(dt);
         }
-        finally
-        {
-            currentEngine = previous;
-        }
+        Native.EngineTick(handle, dt);
         TickCount += 1;
     }
 
-    public void Render()
+    public static void Render()
     {
-        ThrowIfDisposed();
-        Engine? previous = currentEngine;
-        currentEngine = this;
-        try
-        {
-            // No render layer until M6; the seam is the point (PLAN.md: Tick and Render are separate calls even though desktop always pairs them). The Current scoping is already live so the M6 body inherits the contract instead of someone having to remember it.
-        }
-        finally
-        {
-            currentEngine = previous;
-        }
+        ThrowIfNotInitialized();
+        // No render layer until M6; the seam is the point (PLAN.md: Tick and Render are separate calls even though desktop always pairs them). Its per-demesne/per-window scoping is an M6 design input.
     }
 
-    public void Dispose()
+    // Init in stable topological order: repeatedly take the first listed module whose dependencies are all initialized, so ordering is fully determined by declarations + boot-list order (deterministic, per the Determinism rules). Every completed Initialize is recorded into initOrder for Shutdown's reverse walk -- including ones that ran before a later module's init failure.
+    private static void InitializeModules()
     {
-        if (disposed)
+        HashSet<Type> moduleTypes = new HashSet<Type>();
+        foreach (IModule module in modules)
         {
-            return;
+            moduleTypes.Add(module.GetType());
         }
-        disposed = true;
-        try
-        {
-            // Destroy FIRST: its own exit-drain delivers the buffered tail -- including records logged by destroy itself -- through the still-registered log sink. A throwing sink surfaces from here, but teardown is not hostage to it: the finally clears the registration either way.
-            Native.EngineDestroy(handle);
-        }
-        finally
-        {
-            handle = 0;
-            // Clearing drops the Rust-side proxy, whose release thunk unregisters the callback key -- no manual bookkeeping.
-            Native.LogSinkClear();
-        }
-    }
-
-    // Init in stable topological order: repeatedly take the first registered module whose dependencies are all initialized, so ordering is fully determined by declarations + registration order (deterministic, per the Determinism rules).
-    private void InitializeModules()
-    {
         foreach (IModule module in modules)
         {
             foreach (Type dependency in module.Dependencies)
             {
                 if (!moduleTypes.Contains(dependency))
                 {
-                    throw new InvalidOperationException($"module {module.GetType().Name} depends on {dependency.Name}, which is not registered");
+                    throw new InvalidOperationException($"module {module.GetType().Name} depends on {dependency.Name}, which is not in the boot list");
                 }
             }
         }
@@ -223,7 +222,8 @@ public sealed class Engine : IDisposable
             }
             IModule next = remaining[nextIndex];
             remaining.RemoveAt(nextIndex);
-            next.Initialize(this);
+            next.Initialize();
+            initOrder.Add(next);
             initialized.Add(next.GetType());
         }
     }
@@ -283,8 +283,11 @@ public sealed class Engine : IDisposable
         }
     }
 
-    private void ThrowIfDisposed()
+    private static void ThrowIfNotInitialized()
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        if (!initialized)
+        {
+            throw new InvalidOperationException("Engine is not initialized; call Engine.Initialize first");
+        }
     }
 }

@@ -17,7 +17,7 @@ public sealed class ModuleDemoWindowed : IModule
         get { return new[] { typeof(ModuleWindow) }; }
     }
 
-    public void Initialize(Engine engine)
+    public void Initialize()
     {
         // Local, not a field: ModuleWindow keeps the object alive and the handlers receive it as their parameter.
         Window window = moduleWindow.CreateWindow("Buckminster demo -- Escape or close button quits", 640, 360);
@@ -27,30 +27,34 @@ public sealed class ModuleDemoWindowed : IModule
         window.CloseRequested += w =>
         {
             Log.Info("ModuleDemoWindowed: close requested");
-            Finish(w, engine);
+            Finish(w);
         };
         window.Key += (w, key) =>
         {
             Log.Info($"ModuleDemoWindowed: key {key.Code} {(key.Pressed ? "down" : "up")}{(key.Repeat ? " (repeat)" : "")} modifiers={key.Modifiers}");
             if (key.Code == KeyCode.Escape && key.Pressed)
             {
-                Finish(w, engine);
+                Finish(w);
             }
         };
     }
 
-    public void PumpEvents(Engine engine)
+    public void Shutdown()
     {
     }
 
-    public void Tick(Engine engine, double dt)
+    public void PumpEvents()
     {
     }
 
-    private static void Finish(Window window, Engine engine)
+    public void Tick(double dt)
+    {
+    }
+
+    private static void Finish(Window window)
     {
         Log.Info("ModuleDemoWindowed: shutting down");
         window.Destroy();
-        engine.QueueExit();
+        Engine.QueueExit();
     }
 }

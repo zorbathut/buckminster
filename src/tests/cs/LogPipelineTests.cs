@@ -10,17 +10,17 @@ namespace Buckminster.Tests;
 [TestFixture]
 public class LogPipelineTests
 {
-    private static Engine CreateEngine(Action<LogLevel, string> logSink, int levelMax = 5, uint capacity = 1024)
+    private static EngineScope CreateEngine(Action<LogLevel, string> logSink, int levelMax = 5, uint capacity = 1024)
     {
         // Stderr echo off in tests: the echo channel is verified by eye via the desktop host (and cheaply capturable in the chunk-6 two-process harness); asserting our own process stderr isn't worth the contortion.
-        return Engine.Create(new EngineConfig { LogLevelMax = levelMax, LogBufferCapacity = capacity, LogStderrLevelMax = 0 }, logSink);
+        return new EngineScope(logSink, config: new EngineConfig { LogLevelMax = levelMax, LogBufferCapacity = capacity, LogStderrLevelMax = 0 });
     }
 
     [Test]
     public void DeliveryIsSynchronousWithinTheEmittingCall()
     {
         List<(LogLevel Level, string Message)> received = new List<(LogLevel, string)>();
-        using Engine engine = CreateEngine((level, message) => received.Add((level, message)));
+        using EngineScope engine = CreateEngine((level, message) => received.Add((level, message)));
         Log.Info("first");
         // The record arrived before Log.Info returned -- delivered by that call's own exit-drain, not some later pump.
         Assert.That(received, Is.EqualTo(new[] { (LogLevel.Info, "first") }));
@@ -32,7 +32,7 @@ public class LogPipelineTests
     public void RecordsDeliverBeforeTheFailureResultInOrder()
     {
         List<string> received = new List<string>();
-        using Engine engine = CreateEngine((level, message) => received.Add(message));
+        using EngineScope engine = CreateEngine((level, message) => received.Add(message));
         Assert.That(NativeMethods.buck_engine_create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 0 }, out ulong rawEngine), Is.EqualTo(FfiCode.Ok));
         // The probe logs two records then panics: both must reach the log sink, in emission order, BEFORE the Panic code comes back -- in-order reporting is the hard guarantee, and a failed call's diagnostics deserve delivery MORE, not less.
         FfiCode code = NativeMethods.buck_engine_test_log_then_panic(rawEngine);
@@ -49,7 +49,7 @@ public class LogPipelineTests
     {
         // The write-last sequencing rule made distinguishable: a sink that re-enters buck_* during a failing call's drain runs a nested guard whose own exit updates the thread's last-error state -- so the outer failure's message survives ONLY because it is stored after the drain. An implementation storing it before the drain passes every other test in this fixture.
         List<FfiCode> nestedCodes = new List<FfiCode>();
-        using Engine engine = CreateEngine((level, message) => nestedCodes.Add(NativeMethods.buck_add(1, 2, out _)));
+        using EngineScope engine = CreateEngine((level, message) => nestedCodes.Add(NativeMethods.buck_add(1, 2, out _)));
         Assert.That(NativeMethods.buck_engine_create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 0 }, out ulong rawEngine), Is.EqualTo(FfiCode.Ok));
         Assert.That(NativeMethods.buck_engine_test_log_then_panic(rawEngine), Is.EqualTo(FfiCode.Panic));
         Assert.That(NativeMethods.LastErrorMessage(), Does.Contain("deliberate panic after logging"));
@@ -64,7 +64,7 @@ public class LogPipelineTests
     {
         List<string> received = new List<string>();
         bool nested = false;
-        using Engine engine = CreateEngine((level, message) =>
+        using EngineScope engine = CreateEngine((level, message) =>
         {
             received.Add(message);
             if (!nested)
@@ -84,7 +84,7 @@ public class LogPipelineTests
     public void LevelFilterDropsBelowThreshold()
     {
         List<LogLevel> received = new List<LogLevel>();
-        using Engine engine = CreateEngine((level, message) => received.Add(level), levelMax: (int)LogLevel.Warn);
+        using EngineScope engine = CreateEngine((level, message) => received.Add(level), levelMax: (int)LogLevel.Warn);
         Log.Error("kept");
         Log.Warn("kept");
         Log.Info("filtered");
@@ -97,7 +97,7 @@ public class LogPipelineTests
     {
         // Overflow requires records to accumulate without a drain between them; the natural accumulation point under exit-drain is nested emission (a sink that logs runs under the draining flag, so its records buffer for the next exit).
         List<(LogLevel Level, string Message)> received = new List<(LogLevel, string)>();
-        using Engine engine = CreateEngine((level, message) =>
+        using EngineScope engine = CreateEngine((level, message) =>
         {
             received.Add((level, message));
             if (message == "outer")
@@ -124,7 +124,7 @@ public class LogPipelineTests
     {
         List<string> received = new List<string>();
         bool sinkHealthy = true;
-        using Engine engine = CreateEngine((level, message) =>
+        using EngineScope engine = CreateEngine((level, message) =>
         {
             if (!sinkHealthy && message == "boom")
             {
@@ -148,7 +148,7 @@ public class LogPipelineTests
     {
         List<string> received = new List<string>();
         bool sinkHealthy = true;
-        Engine engine = CreateEngine((level, message) =>
+        EngineScope engine = CreateEngine((level, message) =>
         {
             if (!sinkHealthy)
             {
@@ -163,7 +163,7 @@ public class LogPipelineTests
         // The sink's exception is stashed (the body's Panic won the return code); take it so it can't misattribute to a later call.
         Assert.That(CallbackExceptionStash.Take(), Is.Not.Null);
         sinkHealthy = true;
-        // Dispose destroys first; destroy's own exit-drain delivers the stranded tail through the still-registered sink. The raw probe engine is destroyed after (its exit sees a cleared sink and delivers nothing).
+        // Disposing the scope (Engine.Shutdown) destroys first; destroy's own exit-drain delivers the stranded tail through the still-registered sink. The raw probe engine is destroyed after (its exit sees a cleared sink and delivers nothing).
         engine.Dispose();
         Assert.That(received, Is.EqualTo(new[] { "second record before the panic" }));
         Assert.That(NativeMethods.buck_engine_destroy(rawEngine), Is.EqualTo(FfiCode.Ok));
@@ -175,7 +175,7 @@ public class LogPipelineTests
         // The one record whose loss would defeat the loudness invariant: if the sink throws on the synthesized drop-report itself, the count must persist and be re-reported (with any accrued additions) once delivery works.
         List<string> received = new List<string>();
         bool reportBlocked = true;
-        using Engine engine = CreateEngine((level, message) =>
+        using EngineScope engine = CreateEngine((level, message) =>
         {
             if (reportBlocked && message.Contains("never reached the log sink"))
             {
@@ -203,7 +203,7 @@ public class LogPipelineTests
     {
         List<string> received = new List<string>();
         bool sinkHealthy = true;
-        using Engine engine = CreateEngine((level, message) =>
+        using EngineScope engine = CreateEngine((level, message) =>
         {
             if (!sinkHealthy)
             {
@@ -229,7 +229,7 @@ public class LogPipelineTests
         // The regression test for the create-failure path: a new sink that throws on buffered residue during registration must leave NO dangling Rust-side registration -- reversed cleanup order once left a dead key installed, breaking every subsequent create in the process.
         List<string> received = new List<string>();
         bool sinkHealthy = true;
-        Engine first = CreateEngine((level, message) =>
+        EngineScope first = CreateEngine((level, message) =>
         {
             if (!sinkHealthy)
             {
@@ -244,7 +244,7 @@ public class LogPipelineTests
             Assert.That(NativeMethods.buck_engine_create(rawConfig, out rawEngines[i]), Is.EqualTo(FfiCode.Ok));
         }
         sinkHealthy = false;
-        // Three probe rounds: each drain loses exactly one record to the down sink and pushes the rest back, netting a growing tail. After round three the tail is three records; disposing (loses one) leaves two -- enough residue to survive the rejecting sink below (which loses one more) and still prove delivery to the healthy create.
+        // Three probe rounds: each drain loses exactly one record to the down sink and pushes the rest back, netting a growing tail. After round three the tail is three records; shutting down (loses one) leaves two -- enough residue to survive the rejecting sink below (which loses one more) and still prove delivery to the healthy create.
         foreach (ulong rawEngine in rawEngines)
         {
             Assert.That(NativeMethods.buck_engine_test_log_then_panic(rawEngine), Is.EqualTo(FfiCode.Panic));
@@ -252,9 +252,9 @@ public class LogPipelineTests
         }
         Assert.Throws<InvalidOperationException>(first.Dispose);
         // Residue is in the buffer, no sink registered. A create whose sink rejects the residue must fail cleanly...
-        Assert.Throws<InvalidOperationException>(() => Engine.Create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 0 }, (level, message) => throw new InvalidOperationException("rejects residue")));
+        Assert.Throws<InvalidOperationException>(() => new EngineScope((level, message) => throw new InvalidOperationException("rejects residue"), config: new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 0 }));
         // ...and the process must remain fully usable: a healthy create succeeds and receives the residue at registration.
-        using Engine second = Engine.Create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 0 }, (level, message) => received.Add(message));
+        using EngineScope second = new EngineScope((level, message) => received.Add(message), config: new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 0 });
         Assert.That(received, Does.Contain("second record before the panic"));
         foreach (ulong rawEngine in rawEngines)
         {
@@ -266,7 +266,7 @@ public class LogPipelineTests
     public void ExLogsTheFullExceptionAtErrorLevel()
     {
         List<(LogLevel Level, string Message)> received = new List<(LogLevel, string)>();
-        using Engine engine = CreateEngine((level, message) => received.Add((level, message)));
+        using EngineScope engine = CreateEngine((level, message) => received.Add((level, message)));
         Log.Ex(new InvalidOperationException("the thing broke"));
         Assert.That(received, Has.Count.EqualTo(1));
         Assert.That(received[0].Level, Is.EqualTo(LogLevel.Error));
@@ -279,7 +279,7 @@ public class LogPipelineTests
     {
         // C#'s fixed on an empty array pins NULL; the Rust side must handle (null, 0) without touching the pointer (from_raw_parts(null, 0) is a non-unwinding abort no guard can contain).
         List<string> received = new List<string>();
-        using Engine engine = CreateEngine((level, message) => received.Add(message));
+        using EngineScope engine = CreateEngine((level, message) => received.Add(message));
         Log.Info("");
         Assert.That(received, Is.EqualTo(new[] { "" }));
     }
@@ -289,7 +289,7 @@ public class LogPipelineTests
     {
         Assert.Throws<InvalidOperationException>(() => CreateEngine((level, message) => { }, levelMax: 6));
         Assert.Throws<InvalidOperationException>(() => CreateEngine((level, message) => { }, levelMax: -1));
-        Assert.Throws<InvalidOperationException>(() => Engine.Create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 9 }, (level, message) => { }));
+        Assert.Throws<InvalidOperationException>(() => new EngineScope((level, message) => { }, config: new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 9 }));
     }
 
     // A deliberately-discarding sink: silent log dropping is banned as a DEFAULT, and writing the discard down as an implementation is the sanctioned form.

@@ -2,7 +2,7 @@ using System;
 
 namespace Buckminster.Usergame.Demo;
 
-// The demo's root module: no dependencies, one piece of state. Deliberately its own counter rather than a read of engine.TickCount, so the Reporter's dependency on it carries real data instead of being decorative.
+// The demo's root module: no dependencies, one piece of state. Deliberately its own counter rather than a read of Engine.TickCount, so the Reporter's dependency on it carries real data instead of being decorative.
 public sealed class ModuleDemoClock : IModule
 {
     public int Ticks { get; private set; }
@@ -12,16 +12,20 @@ public sealed class ModuleDemoClock : IModule
         get { return Type.EmptyTypes; }
     }
 
-    public void Initialize(Engine engine)
+    public void Initialize()
     {
         Log.Info("ModuleDemoClock initialized");
     }
 
-    public void PumpEvents(Engine engine)
+    public void Shutdown()
     {
     }
 
-    public void Tick(Engine engine, double dt)
+    public void PumpEvents()
+    {
+    }
+
+    public void Tick(double dt)
     {
         Ticks += 1;
     }

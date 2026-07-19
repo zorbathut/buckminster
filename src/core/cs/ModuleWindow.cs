@@ -23,11 +23,20 @@ public sealed class ModuleWindow : IModule
         get { return platform != null ? new[] { platform.GetType() } : Type.EmptyTypes; }
     }
 
-    public void Initialize(Engine engine)
+    public void Initialize()
     {
     }
 
-    public void PumpEvents(Engine engine)
+    public void Shutdown()
+    {
+        // Destroy whatever is still live: an exit queued by anything other than a cooperative close would otherwise leak native windows until process exit. Destroy is idempotent and removes from the list, hence the copy.
+        foreach (Window window in windows.ToArray())
+        {
+            window.Destroy();
+        }
+    }
+
+    public void PumpEvents()
     {
         if (platform == null)
         {
@@ -50,7 +59,7 @@ public sealed class ModuleWindow : IModule
         }
     }
 
-    public void Tick(Engine engine, double dt)
+    public void Tick(double dt)
     {
     }
 

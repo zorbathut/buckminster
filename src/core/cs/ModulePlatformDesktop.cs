@@ -11,17 +11,22 @@ public sealed class ModulePlatformDesktop : IModule
         get { return Type.EmptyTypes; }
     }
 
-    public void Initialize(Engine engine)
+    public void Initialize()
     {
         // Fail fast: the first pump builds the event loop (and claims the thread), so a headless environment errors here at init -- loudly, at pump-to-Ready -- instead of at the first window create.
         Native.PlatformPump();
     }
 
-    public void PumpEvents(Engine engine)
+    public void Shutdown()
+    {
+        // The Rust platform layer has no teardown surface (the process-singleton event loop lives until process exit); windows are destroyed by their owners.
+    }
+
+    public void PumpEvents()
     {
     }
 
-    public void Tick(Engine engine, double dt)
+    public void Tick(double dt)
     {
     }
 

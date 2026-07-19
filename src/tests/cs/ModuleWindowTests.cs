@@ -82,15 +82,34 @@ public class ModuleWindowTests
     }
 
     [Test]
+    public void ShutdownDestroysRemainingLiveWindows()
+    {
+        // An exit queued by anything other than a cooperative close leaves live windows; module teardown must destroy them (native windows would otherwise leak until process exit -- virtual ones prove the walk).
+        ModuleWindow module = new ModuleWindow();
+        Window destroyed;
+        Window survivorOne;
+        Window survivorTwo;
+        using (EngineScope scope = new EngineScope(modules: new IModule[] { module }))
+        {
+            Engine.PumpEvents();
+            destroyed = module.CreateWindow("already gone", 320, 240);
+            survivorOne = module.CreateWindow("one", 320, 240);
+            survivorTwo = module.CreateWindow("two", 320, 240);
+            destroyed.Destroy();
+        }
+        Assert.That(survivorOne.IsDestroyed, Is.True);
+        Assert.That(survivorTwo.IsDestroyed, Is.True);
+        Assert.That(destroyed.IsDestroyed, Is.True);
+    }
+
+    [Test]
     public void ModuleWindowRegistersAndPumpsHeadlessly()
     {
         // As an engine module with no platform, PumpEvents is a no-op -- the composition the smoke row and every wasm cell run.
-        using Engine engine = Engine.Create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 1024, LogStderrLevelMax = 0 }, (level, message) => { });
-        ModuleWindow module = new ModuleWindow();
-        engine.RegisterModule(module);
-        engine.PumpEvents();
-        engine.PumpEvents();
-        engine.Tick(0.016);
-        Assert.That(engine.TickCount, Is.EqualTo(1ul));
+        using EngineScope scope = new EngineScope(modules: new IModule[] { new ModuleWindow() });
+        Engine.PumpEvents();
+        Engine.PumpEvents();
+        Engine.Tick(0.016);
+        Assert.That(Engine.TickCount, Is.EqualTo(1ul));
     }
 }

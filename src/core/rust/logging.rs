@@ -10,7 +10,7 @@ use std::sync::{Mutex, Once};
 
 use crate::ffi::{BuckEnum, FfiCode, FfiError, buck_enum, buck_export, buck_trait};
 
-/// The delivery target for buffered log records: C# implements the generated ILogSink (Engine.Create registers one over its sink delegate); the exit-drain invokes it at the tail of every buck_* call. The message span behind the write is valid only for the duration of the call.
+/// The delivery target for buffered log records: C# implements the generated ILogSink (Engine.Initialize registers one over its sink delegate); the exit-drain invokes it at the tail of every buck_* call. The message span behind the write is valid only for the duration of the call.
 #[buck_trait]
 pub trait LogSink {
     /// Delivers one record. A failure (a throwing C# sink) surfaces as CallbackError from the call whose exit-drain was delivering. Do NOT replace or clear the sink from inside Write: the drain invokes through a vtable copied before delivery, so the superseded registration dies mid-drain and the remaining records of that drain fail loudly against the dead key.
@@ -236,7 +236,7 @@ fn log(level: LogLevel, msg: &str) -> Result<(), FfiError> {
         // Before any engine has configured logging, even the stderr echo is dead (the global max_level defaults to Off) -- a silent-success Log.Error would be unacceptable from a facade whose point is loudness.
         return Err(FfiError::new(
             FfiCode::InvalidArgument,
-            "logging is not configured; create an engine first (Engine.Create installs and configures the log pipeline)",
+            "logging is not configured; initialize the engine first (Engine.Initialize installs and configures the log pipeline)",
         ));
     }
     // Discriminant validation happened in the generated glue; this match is the total LogLevel -> log::Level bridge.

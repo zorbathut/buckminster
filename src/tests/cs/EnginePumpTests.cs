@@ -4,15 +4,10 @@ using NUnit.Framework;
 
 namespace Buckminster.Tests;
 
-// IModule.PumpEvents: the per-pump hook that carries the platform module's winit pump (PLAN M5). The lifecycle contract pinned here: a module's PumpEvents is only ever called after its Initialize has completed -- in the current one-pump init world that means the init pump runs NO module pumps, and every later pump runs them in registration order.
+// IModule.PumpEvents: the per-pump hook that carries the platform module's winit pump (PLAN M5). The lifecycle contract pinned here: a module's PumpEvents is only ever called after its Initialize has completed -- in the current one-pump init world that means the init pump runs NO module pumps, and every later pump runs them in boot-list order.
 [TestFixture]
 public class EnginePumpTests
 {
-    private static Engine CreateEngine()
-    {
-        return Engine.Create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 1024, LogStderrLevelMax = 0 }, (level, message) => { });
-    }
-
     private class ModuleJournal : IModule
     {
         private readonly List<string> journal;
@@ -29,17 +24,21 @@ public class EnginePumpTests
             get { return Type.EmptyTypes; }
         }
 
-        public void Initialize(Engine engine)
+        public void Initialize()
         {
             journal.Add($"init:{name}");
         }
 
-        public void PumpEvents(Engine engine)
+        public void Shutdown()
+        {
+        }
+
+        public void PumpEvents()
         {
             journal.Add($"pump:{name}");
         }
 
-        public void Tick(Engine engine, double dt)
+        public void Tick(double dt)
         {
             journal.Add($"tick:{name}");
         }
@@ -60,76 +59,38 @@ public class EnginePumpTests
             get { return Type.EmptyTypes; }
         }
 
-        public void Initialize(Engine engine)
+        public void Initialize()
         {
-            inner.Initialize(engine);
+            inner.Initialize();
         }
 
-        public void PumpEvents(Engine engine)
+        public void Shutdown()
         {
-            inner.PumpEvents(engine);
         }
 
-        public void Tick(Engine engine, double dt)
+        public void PumpEvents()
         {
-            inner.Tick(engine, dt);
+            inner.PumpEvents();
+        }
+
+        public void Tick(double dt)
+        {
+            inner.Tick(dt);
         }
     }
 
     [Test]
-    public void InitPumpRunsNoModulePumpsAndLaterPumpsRunInRegistrationOrder()
+    public void InitPumpRunsNoModulePumpsAndLaterPumpsRunInBootListOrder()
     {
         List<string> journal = new List<string>();
-        using Engine engine = CreateEngine();
-        engine.RegisterModule(new ModuleJournal(journal, "a"));
-        engine.RegisterModule(new ModuleJournalSecond(journal, "b"));
-        engine.PumpEvents();
+        using EngineScope scope = new EngineScope(modules: new IModule[] { new ModuleJournal(journal, "a"), new ModuleJournalSecond(journal, "b") });
+        Engine.PumpEvents();
         // The init pump: Initializes ran, module PumpEvents did NOT (a module's PumpEvents is only ever called after ALL init completed -- pinned floor for the future multi-pump async init question).
         Assert.That(journal, Is.EqualTo(new[] { "init:a", "init:b" }));
-        engine.PumpEvents();
+        Engine.PumpEvents();
         Assert.That(journal, Is.EqualTo(new[] { "init:a", "init:b", "pump:a", "pump:b" }));
-        engine.Tick(0.016);
-        engine.PumpEvents();
+        Engine.Tick(0.016);
+        Engine.PumpEvents();
         Assert.That(journal, Is.EqualTo(new[] { "init:a", "init:b", "pump:a", "pump:b", "tick:a", "tick:b", "pump:a", "pump:b" }));
-    }
-
-    [Test]
-    public void ModulePumpSeesCurrentScoped()
-    {
-        List<Engine?> observed = new List<Engine?>();
-        using Engine engine = CreateEngine();
-        engine.RegisterModule(new ModulePumpObservesCurrent(observed));
-        engine.PumpEvents();
-        engine.PumpEvents();
-        Assert.That(observed, Is.EqualTo(new[] { engine }));
-        Assert.That(Engine.Current, Is.Null);
-    }
-
-    private class ModulePumpObservesCurrent : IModule
-    {
-        private readonly List<Engine?> observed;
-
-        public ModulePumpObservesCurrent(List<Engine?> observed)
-        {
-            this.observed = observed;
-        }
-
-        public Type[] Dependencies
-        {
-            get { return Type.EmptyTypes; }
-        }
-
-        public void Initialize(Engine engine)
-        {
-        }
-
-        public void PumpEvents(Engine engine)
-        {
-            observed.Add(Engine.Current);
-        }
-
-        public void Tick(Engine engine, double dt)
-        {
-        }
     }
 }
