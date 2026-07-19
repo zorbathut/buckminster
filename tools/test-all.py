@@ -137,15 +137,15 @@ def run(args: list[str]) -> None:
             # Same floor as the build-side check: zero checkable pairs after a successful publish means the obj layout drifted, and silent-green is the exact rot the check exists to prevent. This is host-web's ONLY m2n coverage.
             print("FAIL: the m2n staleness check found no checkable for-publish pairs after a successful publish; the obj layout has drifted (tools/lib/wasmnative.py)")
             published = False
-        stale_pairs = [(pair, missing) for pair in pairs if (missing := wasmnative.find_stale_cookies(pair))]
+        stale_pairs = [(pair, problems) for pair in pairs if (problems := wasmnative.find_problems(pair))]
         if published and stale_pairs:
-            for pair, missing in stale_pairs:
-                print(f"m2n staleness detected -- {wasmnative.describe_stale(pair, missing)}")
+            for pair, problems in stale_pairs:
+                print(f"m2n staleness detected -- {wasmnative.describe_stale(pair, problems)}")
             wasmnative.delete_wasm_obj_dirs([host_web])
             published = _run_section(publish_command, cwd=util.repo_root())
             if published:
                 pairs = wasmnative.find_checkable_pairs(host_web, "publish")
-                if not pairs or any(wasmnative.find_stale_cookies(pair) for pair in pairs):
+                if not pairs or any(wasmnative.find_problems(pair) for pair in pairs):
                     print("FAIL: m2n staleness survived a forced full re-publish; this is a real bug, not incremental staleness")
                     published = False
     wwwroot = os.path.join(src, "host-web", "cs", "bin", "Debug", "net10.0", "publish", "wwwroot")

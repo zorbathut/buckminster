@@ -53,11 +53,11 @@ def _check_and_heal_m2n() -> int:
             # Zero checkable pairs means the paths drifted (TFM bump, config change), not that everything is fine -- silent-green is the exact rot this check exists to prevent. host-wasmnode's for-build pair exists after every build today.
             print("Error: the m2n staleness check found no checkable for-build pairs under either wasm host; the obj layout has drifted and the check needs updating (tools/lib/wasmnative.py)")
             return 1
-        stale = [(pair, missing) for pair in pairs if (missing := wasmnative.find_stale_cookies(pair))]
+        stale = [(pair, problems) for pair in pairs if (problems := wasmnative.find_problems(pair))]
         if not stale:
             return 0
-        for pair, missing in stale:
-            print(f"m2n staleness detected -- {wasmnative.describe_stale(pair, missing)}")
+        for pair, problems in stale:
+            print(f"m2n staleness detected -- {wasmnative.describe_stale(pair, problems)}")
         if attempt == 1:
             print("Error: m2n staleness survived a forced full relink; this is not incremental staleness, it is a real bug")
             return 1
