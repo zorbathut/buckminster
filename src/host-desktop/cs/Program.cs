@@ -1,5 +1,6 @@
 using System;
 using Buckminster;
+using Buckminster.Host.Desktop.Ffi;
 using Buckminster.Usergame.Demo;
 
 namespace Buckminster.Host.Desktop;
@@ -22,6 +23,13 @@ internal static class Program
                 Console.Error.WriteLine($"unknown argument '{arg}' (the only recognized argument is --headless)");
                 return 1;
             }
+        }
+        // The multi-crate canary: this assembly's own generated bindings (Ffi/Generated) round-trip through the executor cdylib once at startup, so a broken macro->dump->ffigen->pinvoke pipeline for non-core crates fails the smoke run loudly instead of lurking until the first real host export.
+        int probe = Native.TestHostProbe(20);
+        if (probe != 41)
+        {
+            Console.Error.WriteLine($"host probe returned {probe}, expected 41 -- the multi-crate FFI pipeline is broken");
+            return 1;
         }
         // Info, not Trace: the Rust log crate is process-global, so winit's internal Debug/Trace records (wayland globals, calloop dispatch) flow through the engine pipeline too -- one pipeline is the design, the level filter is the knob.
         using Engine engine = Engine.Create(new EngineConfig { LogLevelMax = (int)LogLevel.Info, LogBufferCapacity = 1024, LogStderrLevelMax = (int)LogLevel.Warn }, (level, message) => Console.WriteLine($"[{level}] {message}"));

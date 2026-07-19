@@ -8,8 +8,8 @@
         <EmccLinkOptimizationFlag>-O1</EmccLinkOptimizationFlag>
         <!-- Test-host stance (the runner role is permanent, per the host Program.cs comments): publish untrimmed. Trimming a reflection-reached test fixture would silently shrink the suite, and nunit.framework's own trim warnings break the build; bundle size is not what these hosts optimize for. Revisit when a shipped web game cares. -->
         <PublishTrimmed>false</PublishTrimmed>
-        <!-- buckminster_core.a, not cargo's libbuckminster_core.a: DllImport("buckminster_core") only resolves to statically-linked code when the module name matches a linked file's name, and the lib prefix is not stripped in that match; an unmatched name silently becomes an external wasm import that fails at runtime. build-rust-wasm copies the archive to this name. -->
-        <BuckWasmStaticLib>$(MSBuildThisFileDirectory)target/wasm32-unknown-emscripten/debug/buckminster_core.a</BuckWasmStaticLib>
+        <!-- buckminster.a, not cargo's libbuckminster_core.a: DllImport("buckminster") only resolves to statically-linked code when the module name matches a linked file's name, and the lib prefix is not stripped in that match; an unmatched name silently becomes an external wasm import that fails at runtime. build-rust-wasm copies the archive to this name (which also erases the root-crate difference between the wasm archive, built from core, and the desktop cdylib, built from host-desktop). -->
+        <BuckWasmStaticLib>$(MSBuildThisFileDirectory)target/wasm32-unknown-emscripten/debug/buckminster.a</BuckWasmStaticLib>
     </PropertyGroup>
     <ItemGroup>
         <!-- NativeFileReference does not propagate through ProjectReference (dotnet/runtime #114724), so every wasm host must carry its own; this shared import beats copy-paste. -->

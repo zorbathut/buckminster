@@ -1,0 +1,19 @@
+[package]
+name = "buckminster-host-desktop"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+# Module layout convention: language subdirs inside src/<module>/, so the crate root lives in rust/ rather than cargo's default src/.
+[lib]
+path = "rust/lib.rs"
+# The desktop executor artifact (host-as-executor composition): C# loads one agreed library name -- "buckminster" -- no matter which executor built it, because the [LibraryImport] constant is baked into shared assemblies. It cannot be "buckminster_core": core's own rlib already claims that filename in the shared target dir (cargo output-filename collision, unspecified winner, slated to become a hard error -- rust-lang/cargo#6313). rlib is for this crate's own tests.
+name = "buckminster"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Dump-only FFI metadata registration, forwarded: the #[cfg(feature = "ffi-dump")] the buck_* macros emit evaluates in the EXPORTING crate, so this crate needs its own switch; the metadata types it registers live behind core's.
+ffi-dump = ["buckminster-core/ffi-dump"]
+
+[dependencies]
+buckminster-core = { path = "../core" }

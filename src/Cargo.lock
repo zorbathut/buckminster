@@ -118,6 +118,7 @@ name = "buckminster-ffi-dump"
 version = "0.1.0"
 dependencies = [
  "buckminster-core",
+ "buckminster-host-desktop",
  "serde",
  "serde_json",
 ]
@@ -130,6 +131,13 @@ dependencies = [
  "quote",
  "syn",
  "trybuild",
+]
+
+[[package]]
+name = "buckminster-host-desktop"
+version = "0.1.0"
+dependencies = [
+ "buckminster-core",
 ]
 
 [[package]]

@@ -89,9 +89,10 @@ def run(args: list[str]) -> None:
     results: list[tuple[str, bool]] = []
 
     _banner("rust-native")
-    # Two invocations, deliberately: plain `cargo test` covers the default-members (which exclude buckminster-ffi-dump so its ffi-dump feature can't unify into shipped artifacts -- src/Cargo.toml), and the explicit -p run tests the dump bin in its own feature-resolution universe.
+    # Separate invocations, deliberately: plain `cargo test` covers the default-members (which exclude buckminster-ffi-dump so its ffi-dump feature can't unify into shipped artifacts, and the native-only buckminster-host-desktop -- src/Cargo.toml); the explicit -p runs cover those two in their own resolution universes.
     rust_native_ok = _run_section([tc.cargo, "test"], cwd=src)
     rust_native_ok = _run_section([tc.cargo, "test", "-p", "buckminster-ffi-dump"], cwd=src) and rust_native_ok
+    rust_native_ok = _run_section([tc.cargo, "test", "-p", "buckminster-host-desktop"], cwd=src) and rust_native_ok
     results.append(("rust-native", rust_native_ok))
 
     _banner("rust-wasm-node")

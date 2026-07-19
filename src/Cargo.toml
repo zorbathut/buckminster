@@ -1,5 +1,5 @@
 [workspace]
 resolver = "3"
-members = ["core", "ffi-dump", "ffi-macros"]
-# ffi-dump is deliberately NOT a default member: it enables the ffi-dump feature on core, and cargo's feature unification would otherwise compile dump-only metadata into the shipped cdylib/staticlib during a plain workspace build. Build tooling builds/tests the default members; the dump bin runs via `cargo run -p buckminster-ffi-dump` (and tests via -p) in its own feature-resolution universe.
+members = ["core", "ffi-dump", "ffi-macros", "host-desktop"]
+# ffi-dump is deliberately NOT a default member: it enables the ffi-dump feature on core, and cargo's feature unification would otherwise compile dump-only metadata into the shipped cdylib/staticlib during a plain workspace build. host-desktop is not one either: it is native-only (winit lands there in the hoist chunk), and the wasm cells run plain default-member `cargo test`. Build tooling adds each via explicit -p on the cells where it belongs.
 default-members = ["core", "ffi-macros"]

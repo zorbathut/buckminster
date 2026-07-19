@@ -7,8 +7,8 @@ license = "MIT"
 # Module layout convention: language subdirs inside src/<module>/, so the crate root lives in rust/ rather than cargo's default src/.
 [lib]
 path = "rust/lib.rs"
-# cdylib is what C# loads natively; rlib is for integration tests and future dependent crates (in-crate unit tests work without it). The emscripten staticlib is deliberately NOT listed: it's produced per-invocation via `cargo rustc --crate-type staticlib` (build-rust-wasm), because listing it here would make wasm builds also attempt the cdylib link, which needs emcc at cargo time -- an archive needs no linker at all.
-crate-type = ["cdylib", "rlib"]
+# rlib only: core is a library, not an executor. The desktop cdylib C# loads is built from buckminster-host-desktop (host-as-executor composition), with this rlib linked in. The emscripten staticlib is still produced FROM CORE per-invocation via `cargo rustc --crate-type staticlib` (build-rust-wasm) -- the wasm hosts have no Rust half, so core stays the wasm link root; listing staticlib here would make native builds attempt it too.
+crate-type = ["rlib"]
 
 [features]
 # The windowing platform layer (PLAN.md M5). Default-on: the buck_platform_*/buck_window_* symbols must exist on every target (the wasm static link resolves the pinvoke table by name and fails on undefined symbols), so wasm builds compile the module too -- as loud stubs there, since winit has no emscripten backend.

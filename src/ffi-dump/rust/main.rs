@@ -3,6 +3,8 @@
 use serde::Serialize;
 
 use buckminster_core::ffi::meta::{MetaEnum, MetaExport, MetaStruct, MetaTrait};
+// Inventory submissions only exist in crates the binary actually links; an unreferenced dependency is dropped and its exports silently vanish from the dump.
+use buckminster_host_desktop as _;
 
 #[derive(Serialize)]
 struct Dump {
@@ -151,6 +153,18 @@ mod tests {
                 .is_empty(),
             "engine_tick's doc comment should reach the dump"
         );
+    }
+
+    #[test]
+    fn dump_contains_the_host_desktop_probe() {
+        let value = parsed();
+        let exports = value["exports"].as_array().expect("exports is an array");
+        let probe = exports
+            .iter()
+            .find(|entry| entry["symbol"] == "buck_test_host_probe")
+            .expect("buck_test_host_probe present");
+        // The crate_name is what routes this export to the host-desktop assembly in ffigen's crate mapping; a wrong or missing name would silently merge it into core's bindings.
+        assert_eq!(probe["crate_name"], "buckminster-host-desktop");
     }
 
     #[test]

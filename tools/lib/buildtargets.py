@@ -26,8 +26,8 @@ def _run_in(cwd: str, command: list[str]) -> int:
 def _build_rust() -> int:
     # cwd src/: that's where the cargo workspace, Cargo.lock, and rust-toolchain.toml live (walk-up discovery for all three starts at the cwd).
     #
-    # Deliberately NOT --workspace: default-members excludes buckminster-ffi-dump, whose ffi-dump feature would otherwise unify into the shipped cdylib and compile dump-only metadata into it (src/Cargo.toml). The dump bin builds in its own invocation when codegen runs.
-    return _run_in(os.path.join(util.repo_root(), "src"), [_tool_env("BUCK_CARGO"), "build"])
+    # Deliberately NOT --workspace: default-members excludes buckminster-ffi-dump, whose ffi-dump feature would otherwise unify into the shipped cdylib and compile dump-only metadata into it (src/Cargo.toml). The dump bin builds in its own invocation when codegen runs. host-desktop is the explicit -p: it is the desktop executor (its cdylib, lib name "buckminster", is what C# loads -- host-as-executor composition), kept out of default-members because it is native-only and the wasm cells run plain default-member cargo commands.
+    return _run_in(os.path.join(util.repo_root(), "src"), [_tool_env("BUCK_CARGO"), "build", "-p", "buckminster-host-desktop"])
 
 
 def _build_rust_wasm() -> int:
@@ -35,9 +35,9 @@ def _build_rust_wasm() -> int:
     code = _run_in(os.path.join(util.repo_root(), "src"), [_tool_env("BUCK_CARGO"), "rustc", "-p", "buckminster-core", "--target", "wasm32-unknown-emscripten", "--crate-type", "staticlib"])
     if code != 0:
         return code
-    # Copy to the DllImport-matching name: "buckminster_core" only resolves to statically-linked code when it matches a linked file's name, and the lib prefix is not stripped in that match (docs/wasm-toolchain.md).
+    # Copy to the DllImport-matching name: "buckminster" only resolves to statically-linked code when it matches a linked file's name, and the lib prefix is not stripped in that match (docs/wasm-toolchain.md). The rename also erases the root-crate difference: on wasm the archive is built from core (the wasm hosts have no Rust half), on desktop the cdylib from host-desktop -- C# sees one library name either way (host-as-executor composition).
     out_dir = os.path.join(util.repo_root(), "src", "target", "wasm32-unknown-emscripten", "debug")
-    shutil.copy2(os.path.join(out_dir, "libbuckminster_core.a"), os.path.join(out_dir, "buckminster_core.a"))
+    shutil.copy2(os.path.join(out_dir, "libbuckminster_core.a"), os.path.join(out_dir, "buckminster.a"))
     return 0
 
 

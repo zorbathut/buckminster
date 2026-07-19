@@ -3,11 +3,9 @@ using System.Runtime.InteropServices;
 
 namespace Buckminster.Ffi;
 
-// The hand-written residue of the raw import layer: exactly buck_last_error_message (deliberately guard-less -- see the Rust side) plus the Library constant the generated partial shares. Everything #[buck_export]-converted lives in the generated partial (Generated/NativeMethods.g.cs). Convention unchanged: native snake_case names, FfiCode returns, out-params unspecified on a nonzero return.
+// The hand-written residue of the raw import layer: exactly buck_last_error_message (deliberately guard-less -- see the Rust side). Everything #[buck_export]-converted, including the Library constant, lives in the generated partial (Generated/NativeMethods.g.cs). Convention unchanged: native snake_case names, FfiCode returns, out-params unspecified on a nonzero return.
 internal static partial class NativeMethods
 {
-    private const string Library = "buckminster_core";
-
     [LibraryImport(Library)]
     private static partial IntPtr buck_last_error_message();
 
