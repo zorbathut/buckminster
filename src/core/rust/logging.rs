@@ -1,6 +1,6 @@
 //! The unified log pipeline, both languages through one path: Rust code logs via the `log` crate, C# logs via the `Log` facade over [`buck_log`] -- one buffer, one ordering, one filter, one echo channel, one delivery path. Two delivery channels: the immediate channel (stderr today; the seam for future network error reporting or editor-over-socket) fires at emit time, crash-proof and zero-latency; the registered log sink (C#) is delivered by the exit-drain at the tail of every `buck_*` call (ffi::guard), where every lock and borrow is provably released but the causal C# call is still on the stack. Buffering rather than a synchronous callback per statement is what keeps callback rule 4 honest: a `log::info!` deep inside borrowed engine state must not re-enter C#.
 //!
-//! Logging is process-scoped (the log crate's logger is a process global; multi-engine separation is a non-goal): config and sink registration are last-wins across engine creates.
+//! Logging is process-scoped (the log crate's logger is a process global; per-demesne separation is a non-goal): config and sink registration are last-wins across globals-init cycles.
 
 use std::cell::Cell;
 use std::collections::VecDeque;
@@ -27,7 +27,7 @@ static BUFFER: Mutex<LogBuffer> = Mutex::new(LogBuffer {
     dropped: 0,
 });
 static LOG_SINK: Mutex<Option<LogSinkProxy>> = Mutex::new(None);
-// Per-channel thresholds and capacity, read on every log statement, written by every engine create (last-wins). Two independent thresholds: the log crate's single global max_level is set to the max of both, and each channel filters itself here -- otherwise configuring {buffer: Error, stderr: Trace} would silently cap stderr at Error.
+// Per-channel thresholds and capacity, read on every log statement, written by every buck_globals_init (last-wins). Two independent thresholds: the log crate's single global max_level is set to the max of both, and each channel filters itself here -- otherwise configuring {buffer: Error, stderr: Trace} would silently cap stderr at Error.
 static LEVEL_BUFFER: AtomicI32 = AtomicI32::new(0);
 static LEVEL_STDERR: AtomicI32 = AtomicI32::new(0);
 static CAPACITY: AtomicU32 = AtomicU32::new(0);
@@ -83,7 +83,7 @@ const _: () = assert!(
         && log::Level::Trace as i32 == LogLevel::Trace as i32
 );
 
-// The immediate channel: fires at emit time, before buffering -- zero latency and crash-proof (the record is out before the log statement returns; a hard crash one instruction later can't lose it). stderr is today's only implementation; future channels (network error reporting, editor-over-socket) attach here. The write failure is deliberately discarded: the diagnostics channel of last resort discarding its own I/O failure is the one legitimate carve-out from the silent-error ban -- a panicking write (eprintln!) would fire per log line in a host with a dead stderr, poisoning engines from inside engine-scoped bodies.
+// The immediate channel: fires at emit time, before buffering -- zero latency and crash-proof (the record is out before the log statement returns; a hard crash one instruction later can't lose it). stderr is today's only implementation; future channels (network error reporting, editor-over-socket) attach here. The write failure is deliberately discarded: the diagnostics channel of last resort discarding its own I/O failure is the one legitimate carve-out from the silent-error ban -- a panicking write (eprintln!) would fire per log line in a host with a dead stderr, poisoning scopes from inside globals- or demesne-scoped bodies.
 fn channel_immediate(level: i32, message: &str) {
     let _ = writeln!(std::io::stderr(), "[buck:{level}] {message}");
 }
@@ -133,7 +133,7 @@ fn level_filter(value: i32, field: &str) -> Result<log::LevelFilter, FfiError> {
     }
 }
 
-/// Called by every buck_engine_create: installs the logger once, then re-applies thresholds and capacity (last-wins -- first-wins would make any multi-engine process, including the whole test corpus, order-dependent on which engine was created first).
+/// Called by every buck_globals_init: installs the logger once, then re-applies thresholds and capacity (last-wins -- first-wins would make any multi-cycle process, including the whole test corpus, order-dependent on which cycle configured first).
 pub fn configure(
     log_level_max: i32,
     log_stderr_level_max: i32,

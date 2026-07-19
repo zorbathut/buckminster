@@ -3,15 +3,16 @@
 // The buck_* macros emit paths rooted at ::buckminster_core::ffi so the same expansion works from any exporting crate; this alias makes those paths resolve inside this crate too.
 extern crate self as buckminster_core;
 
-mod engine;
+mod demesne;
 pub mod ffi;
+mod globals;
 pub mod keycode;
 pub mod logging;
 pub mod platform;
 pub mod rid;
 
-use engine::EngineConfig;
 use ffi::{FfiCode, FfiError, buck_export, buck_trait};
+use globals::EngineConfig;
 
 // Export conventions (see ARCHITECTURE.md, FFI section): fallible exports return an i32 FfiCode and write results through out-params; out-params are non-null by caller contract. #[buck_export] mechanizes all of this; buck_last_error_message (ffi.rs) is the one deliberate hand-written exception.
 

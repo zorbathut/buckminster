@@ -98,11 +98,13 @@ mod tests {
         let symbols = names_of(&value, "exports", "symbol");
         for expected in [
             "buck_add",
-            "buck_engine_create",
-            "buck_engine_destroy",
-            "buck_engine_test_log_then_panic",
-            "buck_engine_test_panic",
-            "buck_engine_tick",
+            "buck_demesne_create",
+            "buck_demesne_destroy",
+            "buck_demesne_test_log_then_panic",
+            "buck_demesne_test_panic",
+            "buck_globals_init",
+            "buck_globals_shutdown",
+            "buck_globals_tick",
             "buck_test_panic",
         ] {
             assert!(
@@ -116,11 +118,31 @@ mod tests {
     fn dump_records_the_pilot_raw_signature() {
         let value = parsed();
         let exports = value["exports"].as_array().expect("exports is an array");
+        let probe = exports
+            .iter()
+            .find(|entry| entry["symbol"] == "buck_demesne_test_panic")
+            .expect("buck_demesne_test_panic present");
+        let raw: Vec<(String, String)> = probe["raw_params"]
+            .as_array()
+            .expect("raw_params is an array")
+            .iter()
+            .map(|param| {
+                (
+                    param["name"].as_str().expect("param name").to_string(),
+                    param["ty"]["kind"]
+                        .as_str()
+                        .expect("param kind")
+                        .to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(raw, vec![("demesne".to_string(), "scalar".to_string())]);
+        // The out-param/named-return encoding, pinned against buck_globals_tick (dt scalar in, tick_count out through a mut_ptr_scalar, return named).
         let tick = exports
             .iter()
-            .find(|entry| entry["symbol"] == "buck_engine_tick")
-            .expect("buck_engine_tick present");
-        let raw: Vec<(String, String)> = tick["raw_params"]
+            .find(|entry| entry["symbol"] == "buck_globals_tick")
+            .expect("buck_globals_tick present");
+        let tick_raw: Vec<(String, String)> = tick["raw_params"]
             .as_array()
             .expect("raw_params is an array")
             .iter()
@@ -135,23 +157,22 @@ mod tests {
             })
             .collect();
         assert_eq!(
-            raw,
+            tick_raw,
             vec![
-                ("engine".to_string(), "scalar".to_string()),
                 ("dt".to_string(), "scalar".to_string()),
                 ("out_tick_count".to_string(), "mut_ptr_scalar".to_string()),
             ]
         );
         assert_eq!(tick["returns"][0]["name"], "tick_count");
         // The raw layer is plain u64 (asserted above); semantically the handle keeps its kind so the emitter can grow typed C# handles later.
-        assert_eq!(tick["params"][0]["ty"]["kind"], "rid");
+        assert_eq!(probe["params"][0]["ty"]["kind"], "rid");
         // Doc comments written ABOVE the attribute must still flow into the dump (attribute macros see sibling attrs); the emitter turns them into C# XML docs.
         assert!(
-            !tick["docs"]
+            !probe["docs"]
                 .as_array()
                 .expect("docs is an array")
                 .is_empty(),
-            "engine_tick's doc comment should reach the dump"
+            "demesne_test_panic's doc comment should reach the dump"
         );
     }
 

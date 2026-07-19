@@ -31,10 +31,10 @@ pub enum FfiCode {
     Panic = 1,
     CallbackError = 2,
     InvalidArgument = 3,
-    EnginePoisoned = 4,
+    Poisoned = 4,
 }
 
-/// The FFI-problem channel: stale/destroyed handles, poisoned engines, wrong-thread calls, protocol violations (bad pointers, invalid UTF-8), unconfigured subsystems. Surfaced to C# as exceptions because hitting one means a bug or a dead object -- never expected control flow. Domain failures (an operation that can legitimately not succeed) are NOT FfiErrors: model them as ordinary returned data, and give the export the plain non-Result form when it has no FFI-lifecycle concerns at all.
+/// The FFI-problem channel: stale/destroyed handles, poisoned scopes, wrong-thread calls, protocol violations (bad pointers, invalid UTF-8), unconfigured subsystems. Surfaced to C# as exceptions because hitting one means a bug or a dead object -- never expected control flow. Domain failures (an operation that can legitimately not succeed) are NOT FfiErrors: model them as ordinary returned data, and give the export the plain non-Result form when it has no FFI-lifecycle concerns at all.
 pub struct FfiError {
     pub code: FfiCode,
     pub message: String,
@@ -62,7 +62,7 @@ thread_local! {
 pub fn guard(body: impl FnOnce() -> Result<(), FfiError>) -> i32 {
     // The default panic hook stays installed: a contained panic still prints its backtrace to stderr, which is loud and intended.
     //
-    // AssertUnwindSafe is justified because the only state this module observes after a caught panic is LAST_ERROR, which is written after everything else. The rail's contract for callers: Panic means the state the body was mutating is suspect. For engine-scoped exports that suspicion is enforced -- engine.rs catches the panic inside the ENGINES lock scope, marks the engine poisoned (every later op but destroy returns EnginePoisoned), and re-reports it through this rail as an FfiError; a panic reaching the catch_unwind below is one from outside any engine scope.
+    // AssertUnwindSafe is justified because the only state this module observes after a caught panic is LAST_ERROR, which is written after everything else. The rail's contract for callers: Panic means the state the body was mutating is suspect. For globals- and demesne-scoped exports that suspicion is enforced -- globals.rs/demesne.rs catch the panic inside their lock scopes and mark the scope poisoned (every later op but shutdown/destroy returns Poisoned), then re-report it through this rail as an FfiError; a panic reaching the catch_unwind below is one from outside any such scope.
     let body_outcome = catch_unwind(AssertUnwindSafe(body));
     // The drain runs unconditionally (a routine error return or a contained panic deserves its diagnostics more, not less) and under its own catch_unwind: it executes outside the body's containment, and an unwind from here would cross the extern "C" boundary and abort the process.
     let drain_outcome = catch_unwind(AssertUnwindSafe(crate::logging::drain_at_exit));
@@ -113,7 +113,7 @@ fn clear_error() {
     });
 }
 
-/// The human-readable text of a caught panic payload. Shared by `guard` and the engine-scoped inner catch (engine.rs), which converts a panic into a poison + Panic-coded FfiError instead of letting it unwind through the ENGINES MutexGuard.
+/// The human-readable text of a caught panic payload. Shared by `guard` and the scoped inner catches (globals.rs, demesne.rs), which convert a panic into a poison + Panic-coded FfiError instead of letting it unwind through the held MutexGuard.
 pub fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     if let Some(text) = payload.downcast_ref::<&str>() {
         (*text).to_string()

@@ -8,7 +8,6 @@ namespace Buckminster;
 // The static true-globals facade (M5.75: process-global concerns live here because they ARE process-global -- one log pipeline, one module list, one exit flag; the multi-instantiable render-residency unit is Demesne, arriving with the ABI split). Lifecycle: Initialize(config, sink, modules) -> pump until IsReady -> the host drives MainLoop -> Shutdown. Module init runs inside PumpEvents because init is async-shaped from the foundation up -- M4 completes it in one pump, but hosts must not assume that. Initialize/Shutdown are cyclable within a process: INITIALIZE is what returns every static (including the Lifecycle invocation list) to virgin, so post-Shutdown reads stay valid until the next cycle begins. All state is host-thread single-threaded; per-instance concurrency returns with Demesne.
 public static class Engine
 {
-    private static ulong handle;
     private static bool initialized;
     // The init lifecycle latch: a failed module init wedges the engine loudly -- re-pumping after a failure would silently re-run the Initializes that succeeded before it. Recovery is Shutdown + a fresh Initialize.
     private static bool initFailed;
@@ -21,7 +20,7 @@ public static class Engine
     // The deferred exit flag (GLFW WindowShouldClose lineage): QueueExit's caller is typically a module mid-Tick, sitting under the engine's own iteration, where synchronous teardown is impossible -- so the frame finishes and the host loop condition is what honors the flag. The engine itself never acts on it (ticking past it is legal and fully functional; MainLoop's mid-burst check is pacing policy, not engine policy). Read stays valid post-Shutdown like IsReady/TickCount.
     public static bool ExitQueued { get; private set; }
 
-    // Completed ticks. Increments only after the modules and the native tick have all run, so a thrown module Tick can't desync this from the Rust-side counter.
+    // Completed ticks, assigned from the native counter's return after the modules and the native tick have all run -- a thrown module Tick advances neither side, and the two cannot desync.
     public static ulong TickCount { get; private set; }
 
     // App-lifecycle notifications (LifecycleEvent doc): hosts call NotifyLifecycle, modules and the game subscribe here (typically in their Initialize). The invocation list is cleared by the next Initialize, so cycle N-1's subscribers can never ghost into cycle N.
@@ -43,22 +42,21 @@ public static class Engine
                 throw new InvalidOperationException($"module type {module.GetType().Name} appears twice in the boot list; dependencies are declared by concrete type, so duplicates would be ambiguous");
             }
         }
-        ulong created = Native.EngineCreate(config);
+        Native.GlobalsInit(config);
         LogSinkVtable vtable = LogSinkThunks.Create(new SinkAdapter(logSink));
         try
         {
-            // buck_log_sink_set's own exit is the first delivery point, and the buffer may hold residue (a previous cycle's pushback tail); if the new sink throws on it, the just-created handle and registration must not leak.
+            // buck_log_sink_set's own exit is the first delivery point, and the buffer may hold residue (a previous cycle's pushback tail); if the new sink throws on it, the just-initialized Rust globals and the registration must not leak.
             Native.LogSinkSet(in vtable);
         }
         catch
         {
             // Cleanup ORDER is load-bearing: clear the Rust registration FIRST (dropping the Rust-side proxy fires the release thunk, which unregisters the callback key deterministically), so nothing later can fire a dead key. The two return codes are deliberately unchecked raw calls: with the registration already cleared they can only fail via states that would themselves have thrown above, and the sink's original exception must win. Known narrow gap: if the set failed BEFORE storing (today only the poisoned-mutex panic path), the proxy was never registered Rust-side, clear releases nothing, and the key leaks -- accepted for a path that already means the process is broken.
             NativeMethods.buck_log_sink_clear();
-            NativeMethods.buck_engine_destroy(created);
+            NativeMethods.buck_globals_shutdown();
             throw;
         }
         // Point of no return: reset every static to virgin AFTER the fallible work, so a failed Initialize leaves the previous cycle's post-Shutdown reads intact.
-        handle = created;
         initialized = true;
         initFailed = false;
         IsReady = false;
@@ -98,12 +96,11 @@ public static class Engine
         {
             try
             {
-                // Destroy delivers the buffered tail -- including records logged by module Shutdowns and by destroy itself -- through the still-registered log sink. A throwing sink surfaces from here, but teardown is not hostage to it: the finally clears the registration either way.
-                Native.EngineDestroy(handle);
+                // The globals shutdown's own exit-drain delivers the buffered tail -- including records logged by module Shutdowns -- through the still-registered log sink. A throwing sink surfaces from here, but teardown is not hostage to it: the finally clears the registration either way.
+                Native.GlobalsShutdown();
             }
             finally
             {
-                handle = 0;
                 // Clearing drops the Rust-side proxy, whose release thunk unregisters the callback key -- no manual bookkeeping.
                 Native.LogSinkClear();
             }
@@ -166,8 +163,8 @@ public static class Engine
         {
             module.Tick(dt);
         }
-        Native.EngineTick(handle, dt);
-        TickCount += 1;
+        // Assigning the native counter's return keeps the two sides trivially in sync -- and a thrown module Tick above means neither advanced.
+        TickCount = Native.GlobalsTick(dt);
     }
 
     public static void Render()

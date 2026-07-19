@@ -33,15 +33,15 @@ public class LogPipelineTests
     {
         List<string> received = new List<string>();
         using EngineScope engine = CreateEngine((level, message) => received.Add(message));
-        Assert.That(NativeMethods.buck_engine_create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 0 }, out ulong rawEngine), Is.EqualTo(FfiCode.Ok));
+        Assert.That(NativeMethods.buck_demesne_create(out ulong rawDemesne), Is.EqualTo(FfiCode.Ok));
         // The probe logs two records then panics: both must reach the log sink, in emission order, BEFORE the Panic code comes back -- in-order reporting is the hard guarantee, and a failed call's diagnostics deserve delivery MORE, not less.
-        FfiCode code = NativeMethods.buck_engine_test_log_then_panic(rawEngine);
+        FfiCode code = NativeMethods.buck_demesne_test_log_then_panic(rawDemesne);
         Assert.That(code, Is.EqualTo(FfiCode.Panic));
         Assert.That(received, Is.EqualTo(new[] { "first record before the panic", "second record before the panic" }));
         Assert.That(NativeMethods.LastErrorMessage(), Does.Contain("deliberate panic after logging"));
-        // And the panic still poisoned the engine (delivery is orthogonal to the poison policy).
-        Assert.That(NativeMethods.buck_engine_tick(rawEngine, 0.016, out _), Is.EqualTo(FfiCode.EnginePoisoned));
-        Assert.That(NativeMethods.buck_engine_destroy(rawEngine), Is.EqualTo(FfiCode.Ok));
+        // And the panic still poisoned the demesne (delivery is orthogonal to the poison policy).
+        Assert.That(NativeMethods.buck_demesne_test_panic(rawDemesne), Is.EqualTo(FfiCode.Poisoned));
+        Assert.That(NativeMethods.buck_demesne_destroy(rawDemesne), Is.EqualTo(FfiCode.Ok));
     }
 
     [Test]
@@ -50,13 +50,13 @@ public class LogPipelineTests
         // The write-last sequencing rule made distinguishable: a sink that re-enters buck_* during a failing call's drain runs a nested guard whose own exit updates the thread's last-error state -- so the outer failure's message survives ONLY because it is stored after the drain. An implementation storing it before the drain passes every other test in this fixture.
         List<FfiCode> nestedCodes = new List<FfiCode>();
         using EngineScope engine = CreateEngine((level, message) => nestedCodes.Add(NativeMethods.buck_add(1, 2, out _)));
-        Assert.That(NativeMethods.buck_engine_create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 0 }, out ulong rawEngine), Is.EqualTo(FfiCode.Ok));
-        Assert.That(NativeMethods.buck_engine_test_log_then_panic(rawEngine), Is.EqualTo(FfiCode.Panic));
+        Assert.That(NativeMethods.buck_demesne_create(out ulong rawDemesne), Is.EqualTo(FfiCode.Ok));
+        Assert.That(NativeMethods.buck_demesne_test_log_then_panic(rawDemesne), Is.EqualTo(FfiCode.Panic));
         Assert.That(NativeMethods.LastErrorMessage(), Does.Contain("deliberate panic after logging"));
         // Journal-style check that the nested calls really ran and succeeded (asserting inside the sink would surface as CallbackError and muddy the path under test).
         Assert.That(nestedCodes, Is.Not.Empty);
         Assert.That(nestedCodes, Is.All.EqualTo(FfiCode.Ok));
-        Assert.That(NativeMethods.buck_engine_destroy(rawEngine), Is.EqualTo(FfiCode.Ok));
+        Assert.That(NativeMethods.buck_demesne_destroy(rawDemesne), Is.EqualTo(FfiCode.Ok));
     }
 
     [Test]
@@ -157,16 +157,16 @@ public class LogPipelineTests
             received.Add(message);
         });
         // Stranding needs a multi-record batch whose sink fails partway (a single Log call's batch is one record -- its failure leaves no tail). The two-record probe delivers exactly that: sink fails on record one (lost), record two is pushed back stranded.
-        Assert.That(NativeMethods.buck_engine_create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 0 }, out ulong rawEngine), Is.EqualTo(FfiCode.Ok));
+        Assert.That(NativeMethods.buck_demesne_create(out ulong rawDemesne), Is.EqualTo(FfiCode.Ok));
         sinkHealthy = false;
-        Assert.That(NativeMethods.buck_engine_test_log_then_panic(rawEngine), Is.EqualTo(FfiCode.Panic));
+        Assert.That(NativeMethods.buck_demesne_test_log_then_panic(rawDemesne), Is.EqualTo(FfiCode.Panic));
         // The sink's exception is stashed (the body's Panic won the return code); take it so it can't misattribute to a later call.
         Assert.That(CallbackExceptionStash.Take(), Is.Not.Null);
         sinkHealthy = true;
-        // Disposing the scope (Engine.Shutdown) destroys first; destroy's own exit-drain delivers the stranded tail through the still-registered sink. The raw probe engine is destroyed after (its exit sees a cleared sink and delivers nothing).
+        // Disposing the scope (Engine.Shutdown) destroys first; destroy's own exit-drain delivers the stranded tail through the still-registered sink. The raw probe demesne is destroyed after (its exit sees a cleared sink and delivers nothing).
         engine.Dispose();
         Assert.That(received, Is.EqualTo(new[] { "second record before the panic" }));
-        Assert.That(NativeMethods.buck_engine_destroy(rawEngine), Is.EqualTo(FfiCode.Ok));
+        Assert.That(NativeMethods.buck_demesne_destroy(rawDemesne), Is.EqualTo(FfiCode.Ok));
     }
 
     [Test]
@@ -211,16 +211,16 @@ public class LogPipelineTests
             }
             received.Add(message);
         });
-        Assert.That(NativeMethods.buck_engine_create(new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 0 }, out ulong rawEngine), Is.EqualTo(FfiCode.Ok));
+        Assert.That(NativeMethods.buck_demesne_create(out ulong rawDemesne), Is.EqualTo(FfiCode.Ok));
         sinkHealthy = false;
         // Probe batch of two: sink fails on record one (lost), record two is the pushed-back tail.
-        Assert.That(NativeMethods.buck_engine_test_log_then_panic(rawEngine), Is.EqualTo(FfiCode.Panic));
+        Assert.That(NativeMethods.buck_demesne_test_log_then_panic(rawDemesne), Is.EqualTo(FfiCode.Panic));
         Assert.That(CallbackExceptionStash.Take(), Is.Not.Null);
         sinkHealthy = true;
         // One batch, two records: the redelivered tail must precede the fresh record -- it is chronologically older.
         Log.Info("fresh");
         Assert.That(received, Is.EqualTo(new[] { "second record before the panic", "fresh" }));
-        Assert.That(NativeMethods.buck_engine_destroy(rawEngine), Is.EqualTo(FfiCode.Ok));
+        Assert.That(NativeMethods.buck_demesne_destroy(rawDemesne), Is.EqualTo(FfiCode.Ok));
     }
 
     [Test]
@@ -236,18 +236,17 @@ public class LogPipelineTests
                 throw new InvalidOperationException("first sink down");
             }
         });
-        // Three fresh raw engines (the probe poisons its engine, so each round needs its own), created while the sink is healthy and the buffer empty.
-        EngineConfig rawConfig = new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 0 };
-        ulong[] rawEngines = new ulong[3];
-        for (int i = 0; i < rawEngines.Length; i++)
+        // Three fresh raw demesnes (the probe poisons its demesne, so each round needs its own), created while the sink is healthy and the buffer empty.
+        ulong[] rawDemesnes = new ulong[3];
+        for (int i = 0; i < rawDemesnes.Length; i++)
         {
-            Assert.That(NativeMethods.buck_engine_create(rawConfig, out rawEngines[i]), Is.EqualTo(FfiCode.Ok));
+            Assert.That(NativeMethods.buck_demesne_create(out rawDemesnes[i]), Is.EqualTo(FfiCode.Ok));
         }
         sinkHealthy = false;
         // Three probe rounds: each drain loses exactly one record to the down sink and pushes the rest back, netting a growing tail. After round three the tail is three records; shutting down (loses one) leaves two -- enough residue to survive the rejecting sink below (which loses one more) and still prove delivery to the healthy create.
-        foreach (ulong rawEngine in rawEngines)
+        foreach (ulong rawDemesne in rawDemesnes)
         {
-            Assert.That(NativeMethods.buck_engine_test_log_then_panic(rawEngine), Is.EqualTo(FfiCode.Panic));
+            Assert.That(NativeMethods.buck_demesne_test_log_then_panic(rawDemesne), Is.EqualTo(FfiCode.Panic));
             Assert.That(CallbackExceptionStash.Take(), Is.Not.Null);
         }
         Assert.Throws<InvalidOperationException>(first.Dispose);
@@ -256,9 +255,9 @@ public class LogPipelineTests
         // ...and the process must remain fully usable: a healthy create succeeds and receives the residue at registration.
         using EngineScope second = new EngineScope((level, message) => received.Add(message), config: new EngineConfig { LogLevelMax = 5, LogBufferCapacity = 16, LogStderrLevelMax = 0 });
         Assert.That(received, Does.Contain("second record before the panic"));
-        foreach (ulong rawEngine in rawEngines)
+        foreach (ulong rawDemesne in rawDemesnes)
         {
-            Assert.That(NativeMethods.buck_engine_destroy(rawEngine), Is.EqualTo(FfiCode.Ok));
+            Assert.That(NativeMethods.buck_demesne_destroy(rawDemesne), Is.EqualTo(FfiCode.Ok));
         }
     }
 

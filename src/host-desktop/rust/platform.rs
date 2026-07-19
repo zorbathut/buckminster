@@ -249,7 +249,7 @@ fn claim_or_verify_owner() -> Result<(), FfiError> {
     }
 }
 
-// Runs body with the platform state, creating the event loop on first use. The RefCell stays borrowed across the body, so platform exports must never re-enter each other -- same shape as the engine registry's lock discipline.
+// Runs body with the platform state, creating the event loop on first use. The RefCell stays borrowed across the body, so platform exports must never re-enter each other -- same shape as the demesne registry's lock discipline.
 fn with_platform<R>(
     body: impl FnOnce(&mut PlatformState) -> Result<R, FfiError>,
 ) -> Result<R, FfiError> {
